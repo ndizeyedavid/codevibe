@@ -402,8 +402,13 @@ export function getDashboardHtml(
             transition: width 0.3s ease;
         }
 
+        /* Issue #5: this bar's width is the AI share of today's code, so it
+           must not be green - green reads as "approved/passing" and the AI
+           portion is exactly what a student is trying to shrink. Blue means
+           "within target", amber/red mean pushing past it. Green is kept for
+           the ownership meter, which really is a pass/fail signal. */
         .core-metric-bar-fill.good {
-            background: linear-gradient(90deg, #27ae60, #2ecc71);
+            background: linear-gradient(90deg, #3498db, #5dade2);
         }
 
         .core-metric-bar-fill.warning {
@@ -2341,7 +2346,11 @@ export function getDashboardHtml(
 
                 const aPct = Math.round(a.authorshipPercentage * 10) / 10;
                 const aWithin = a.authorshipPercentage <= policy.maxAuthorshipPercentage;
-                const aColor = aWithin ? 'var(--vscode-testing-iconPassed)' : 'var(--vscode-editorError-foreground)';
+                // Issue #5: the AI authorship meter was green while within the
+                // limit, which reads as "passed" even though the bar is showing
+                // how much AI wrote. Blue keeps green meaning "within limits"
+                // for the ownership meter, which is the actual pass/fail one.
+                const aColor = aWithin ? 'var(--vscode-charts-blue)' : 'var(--vscode-editorError-foreground)';
                 const aVerdict = aWithin
                     ? 'Within the ' + policy.maxAuthorshipPercentage + '% limit'
                     : 'Over the ' + policy.maxAuthorshipPercentage + '% limit';
@@ -2416,7 +2425,7 @@ export function getDashboardHtml(
                             '<div class="ap-name">' + escapeHtml(assignment.name) + '</div>' +
                             '<div class="ap-dates">' + metaBits.join(' &middot; ') + '</div>' +
                         '</div>' +
-                        '<div class="ap-pill" style="color: ' + status.color + ';">' + status.label + '</div>' +
+                        '<div class="ap-pill" style="color: ' + status.color + ';"' + (status.tooltip ? ' title="' + escapeHtml(status.tooltip) + '"' : '') + '>' + escapeHtml(status.label) + '</div>' +
                     '</div>' +
                     metersHtml +
                     '<div class="ap-section-title">Policy violations</div>' +
@@ -2430,20 +2439,41 @@ export function getDashboardHtml(
 
         function computeAssignmentStatus(metrics, policy) {
             if (!metrics) {
-                return { label: 'No data', class: 'info', color: 'var(--vscode-descriptionForeground)' };
+                return { label: 'No data', class: 'info', color: 'var(--vscode-descriptionForeground)', tooltip: '' };
             }
-            const hasHigh = metrics.violations.some(function(v) { return v.severity === 'high'; });
-            const hasMedium = metrics.violations.some(function(v) { return v.severity === 'medium'; });
+            const violations = metrics.violations || [];
+            const hasHigh = violations.some(function(v) { return v.severity === 'high'; });
+            const hasMedium = violations.some(function(v) { return v.severity === 'medium'; });
             const authorshipOk = metrics.authorship.authorshipPercentage <= policy.maxAuthorshipPercentage;
             const ownershipOk = metrics.ownership.score >= policy.minOwnershipScore;
 
+            // Issue #5: the badge used to just say "Policy violations", so a
+            // student sitting at 2% AI had no way to tell that the trigger was
+            // something else entirely (an agentic-use detection, say). Name the
+            // count and list the reasons on hover so the badge explains itself.
+            const reasonLines = [];
+            if (!authorshipOk) {
+                reasonLines.push('AI authorship is over the ' + policy.maxAuthorshipPercentage + '% limit');
+            }
+            if (!ownershipOk) {
+                reasonLines.push('Ownership is below the ' + policy.minOwnershipScore + ' minimum');
+            }
+            violations.forEach(function(v) {
+                const suffix = v.count > 1 ? ' (x' + v.count + ')' : '';
+                reasonLines.push(v.message + suffix);
+            });
+            const tooltip = reasonLines.length ? reasonLines.join('\n') : '';
+
             if (hasHigh) {
-                return { label: 'Policy violations', class: 'error', color: 'var(--vscode-editorError-foreground)' };
+                const label = violations.length === 1
+                    ? '1 policy violation'
+                    : violations.length + ' policy violations';
+                return { label: label, class: 'error', color: 'var(--vscode-editorError-foreground)', tooltip: tooltip };
             }
             if (hasMedium || !authorshipOk || !ownershipOk) {
-                return { label: 'Attention needed', class: 'warning', color: 'var(--vscode-editorWarning-foreground)' };
+                return { label: 'Attention needed', class: 'warning', color: 'var(--vscode-editorWarning-foreground)', tooltip: tooltip };
             }
-            return { label: 'On track', class: 'good', color: 'var(--vscode-testing-iconPassed)' };
+            return { label: 'On track', class: 'good', color: 'var(--vscode-testing-iconPassed)', tooltip: '' };
         }
 
         function renderDashboard(data) {

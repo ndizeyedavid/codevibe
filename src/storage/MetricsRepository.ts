@@ -5,6 +5,7 @@
 
 import { DatabaseManager } from "./DatabaseManager";
 import { isExcludedFile } from "../utils/ExcludedPaths";
+import { matchesAnyGlob } from "../utils/globMatch";
 import {
   addDays,
   endOfLocalDay,
@@ -35,6 +36,25 @@ export class MetricsRepository {
   private readonly CACHE_DURATION_MS = 3000; // 3 seconds cache
 
   constructor(private db: DatabaseManager) {}
+
+  /**
+   * Globs that currently exempt a file from authorship accounting.
+   *
+   * The active assignment's policy wins, so the dashboard matches the
+   * assignment report for the same day. With no assignment active this falls
+   * back to the database's default policy, which already exempts README and
+   * markdown files.
+   *
+   * Failures degrade to "no exemptions" rather than throwing: a missing
+   * assignments table must not stop the dashboard from rendering.
+   */
+  private async getExemptFileGlobs(): Promise<string[]> {
+    try {
+      return await this.db.getActiveExemptFileGlobs();
+    } catch (error) {
+      return [];
+    }
+  }
 
   async recordEvent(event: TrackingEvent): Promise<number> {
     return await this.db.insertEvent(event);
@@ -271,13 +291,30 @@ export class MetricsRepository {
       return eventDate === targetDate;
     });
 
+    // Issue #5: exemptFileGlobs were only ever consulted by PolicyEngine when
+    // building assignment reports, so the dashboard counted exempt files anyway.
+    // Pasting AI text into README.md (exempt in the default policy) drove the
+    // dashboard to 88% while the report for the same day said otherwise. Apply
+    // the same exemptions here so the two views cannot disagree.
+    const exemptFileGlobs = await this.getExemptFileGlobs();
+    const isExempt = (filePath: string | undefined) =>
+      matchesAnyGlob(filePath, exemptFileGlobs);
+
+    // Drop exempt-file events before anything counts them, so manual lines and
+    // the per-tool breakdown stay consistent with the AI total below.
+    const trackedEvents = dateFilteredEvents.filter(
+      (event) => !isExempt(event.filePath),
+    );
+
     // BUG #1 FIX: Use file-level totals instead of event-based totals
     // Events can be duplicated (inline-completion-api + external-file-change for same edit)
     // File-level data in file_review_status table is the source of truth
 
     // AUTHORSHIP FIX: Query ALL files for authorship calculation (both reviewed and unreviewed)
     // Authorship balance should reflect all code written today, not just unreviewed code
-    const allFilesForAuthorship = await this.db.getAllFilesForDate(date);
+    const allFilesForAuthorship = (await this.db.getAllFilesForDate(date)).filter(
+      (file) => !isExempt(file.filePath),
+    );
 
     // Calculate total AI lines from ALL files with changes today (reviewed or not)
     // Filter: has changes AND timestamp is within this date
@@ -317,7 +354,7 @@ export class MetricsRepository {
     const now = Date.now();
     const oneHourAgo = now - 60 * 60 * 1000;
 
-    const realTimeEvents = dateFilteredEvents.filter((event) => {
+    const realTimeEvents = trackedEvents.filter((event) => {
       const metadata = event.metadata as any;
 
       // Always exclude old scanner events (historical scanning)

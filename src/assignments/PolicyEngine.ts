@@ -3,6 +3,7 @@
  * Classifies AI events and evaluates them against an assignment policy.
  */
 
+import { matchesAnyGlob } from "../utils/globMatch";
 import { addDays, startOfLocalDay } from "../utils/DateUtils";
 import {
   TrackingEvent,
@@ -411,21 +412,6 @@ export class PolicyEngine {
   }
 
   private isExemptFile(filePath: string, policy: AssignmentPolicy): boolean {
-    return policy.exemptFileGlobs.some((glob) =>
-      this.matchGlob(filePath, glob),
-    );
-  }
-
-  private matchGlob(filePath: string, glob: string): boolean {
-    const regex = new RegExp(
-      "^" +
-        glob
-          .replace(/\*\*/g, "<<<ANYDEPTH>>>")
-          .replace(/\*/g, "[^/]*")
-          .replace(/<<<ANYDEPTH>>>/g, ".*")
-          .replace(/\?/g, ".") +
-        "$",
-    );
-    return regex.test(filePath);
+    return matchesAnyGlob(filePath, policy.exemptFileGlobs);
   }
 }

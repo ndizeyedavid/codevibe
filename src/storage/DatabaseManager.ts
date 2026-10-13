@@ -1814,6 +1814,27 @@ export class DatabaseManager implements IDatabaseManager {
     return this.mapAssignmentRecordToAssignment(row);
   }
 
+  /**
+   * Globs that should be exempt from authorship accounting right now.
+   *
+   * Prefers the active assignment's own policy so the dashboard and the
+   * assignment report agree (issue #5). Falls back to the built-in default
+   * policy when no assignment is active, so README/markdown stay exempt even
+   * for someone who has not set an assignment up.
+   */
+  async getActiveExemptFileGlobs(): Promise<string[]> {
+    try {
+      const assignment = await this.getActiveAssignment();
+      if (assignment?.policy?.exemptFileGlobs?.length) {
+        return assignment.policy.exemptFileGlobs;
+      }
+    } catch (error) {
+      // A missing/uninitialised assignments table must not take down metrics.
+    }
+
+    return this.createDefaultAssignmentPolicy().exemptFileGlobs;
+  }
+
   async setActiveAssignment(id: string | null): Promise<void> {
     if (!this.db) {
       throw new Error("Database not initialized");

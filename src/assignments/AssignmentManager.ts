@@ -3,6 +3,7 @@
  * Manages assignment lifecycle and policies for academic AI usage tracking.
  */
 
+import { matchesAnyGlob } from "../utils/globMatch";
 import { MetricsRepository } from '../storage/MetricsRepository';
 import {
   Assignment,
@@ -194,21 +195,7 @@ export class AssignmentManager {
    * Check if a file path matches any exempt glob in the policy
    */
   isExemptFile(filePath: string, policy: AssignmentPolicy): boolean {
-    return policy.exemptFileGlobs.some(glob => this.matchGlob(filePath, glob));
-  }
-
-  private matchGlob(filePath: string, glob: string): boolean {
-    // Very simple glob matching: **/ matches any depth, * matches any chars except /
-    const regex = new RegExp(
-      '^' +
-      glob
-        .replace(/\*\*/g, '<<<ANYDEPTH>>>')
-        .replace(/\*/g, '[^/]*')
-        .replace(/<<<ANYDEPTH>>>/g, '.*')
-        .replace(/\?/g, '.')
-      + '$'
-    );
-    return regex.test(filePath);
+    return matchesAnyGlob(filePath, policy.exemptFileGlobs);
   }
 
   private generateAssignmentId(): string {
