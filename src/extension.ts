@@ -30,6 +30,10 @@ import { execSync } from "child_process";
 import { EventType, DeveloperLevel } from "./types";
 import { isGitRepository } from "./utils/SecurityUtils";
 import { getToday } from "./utils/DateUtils";
+import {
+  registerCommandSafe,
+  resetCommandRegistration,
+} from "./utils/CommandRegistration";
 
 // Extension state
 let databaseManager: DatabaseManager | null = null;
@@ -69,7 +73,7 @@ export async function activate(context: vscode.ExtensionContext) {
     await checkGitRepository(context);
 
     // Register commands
-    registerCommands(context);
+    await registerCommands(context);
 
     // Initialize metrics collector and trackers (Phase 2)
     await initializeTrackers(context);
@@ -142,6 +146,10 @@ function getWorkspacePath(): string | undefined {
  * Extension deactivation
  */
 export async function deactivate() {
+  // Drop our command registrations so a re-activation in the same process
+  // starts clean instead of colliding with itself (issue #4).
+  resetCommandRegistration();
+
   // Dispose error reporting
   if (errorReporter) {
     errorReporter.dispose();
@@ -573,7 +581,7 @@ async function initializeAlerts(
   });
 
   // Manual threshold check command (for testing/debugging)
-  const checkThresholdsNow = vscode.commands.registerCommand(
+  const checkThresholdsNow = await registerCommandSafe(
     "codePause.checkThresholds",
     async () => {
       await checkThresholds(true);
@@ -585,7 +593,7 @@ async function initializeAlerts(
   context.subscriptions.push(checkThresholdsNow);
 
   // Test notification command (for verifying notification visibility)
-  const testNotification = vscode.commands.registerCommand(
+  const testNotification = await registerCommandSafe(
     "codePause.testNotification",
     async () => {
       // Test 1: Modal notification
@@ -747,9 +755,11 @@ async function initializeCustomization(
 /**
  * Register VSCode commands
  */
-function registerCommands(context: vscode.ExtensionContext): void {
+async function registerCommands(
+  context: vscode.ExtensionContext,
+): Promise<void> {
   // Open Dashboard command
-  const openDashboard = vscode.commands.registerCommand(
+  const openDashboard = await registerCommandSafe(
     "codePause.openDashboard",
     async () => {
       if (dashboardProvider) {
@@ -771,7 +781,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Start Onboarding command
-  const startOnboarding = vscode.commands.registerCommand(
+  const startOnboarding = await registerCommandSafe(
     "codePause.startOnboarding",
     async () => {
       if (onboardingManager) {
@@ -783,7 +793,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Reset Onboarding command (for testing)
-  const resetOnboarding = vscode.commands.registerCommand(
+  const resetOnboarding = await registerCommandSafe(
     "codePause.resetOnboarding",
     async () => {
       if (onboardingManager) {
@@ -805,7 +815,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Open Settings command
-  const openSettings = vscode.commands.registerCommand(
+  const openSettings = await registerCommandSafe(
     "codePause.openSettings",
     async () => {
       await vscode.commands.executeCommand(
@@ -816,7 +826,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Snooze command (updated to use SnoozeManager)
-  const snooze = vscode.commands.registerCommand(
+  const snooze = await registerCommandSafe(
     "codePause.snooze",
     async () => {
       if (!snoozeManager) {
@@ -829,7 +839,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Show stats command (for testing)
-  const showDatabaseInfo = vscode.commands.registerCommand(
+  const showDatabaseInfo = await registerCommandSafe(
     "codePause.showDatabaseInfo",
     async () => {
       if (!databaseManager) {
@@ -870,7 +880,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Manual data cleanup command (for testing 30-day retention)
-  const cleanupOldData = vscode.commands.registerCommand(
+  const cleanupOldData = await registerCommandSafe(
     "codePause.cleanupOldData",
     async () => {
       if (!dataRetentionManager) {
@@ -886,7 +896,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
 
   // Purge historical false positives from generated/dependency paths
   // (node_modules, venv, build outputs recorded before the ignore list).
-  const purgeExcludedData = vscode.commands.registerCommand(
+  const purgeExcludedData = await registerCommandSafe(
     "codePause.purgeExcludedData",
     async () => {
       if (!metricsRepository) {
@@ -915,7 +925,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const showStats = vscode.commands.registerCommand(
+  const showStats = await registerCommandSafe(
     "codePause.showStats",
     async () => {
       if (!metricsRepository) {
@@ -935,7 +945,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Diagnostic command to check alert system status
-  const diagnoseAlerts = vscode.commands.registerCommand(
+  const diagnoseAlerts = await registerCommandSafe(
     "codePause.diagnoseAlerts",
     async () => {
       if (
@@ -1021,7 +1031,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Refresh dashboard command
-  const refreshDashboard = vscode.commands.registerCommand(
+  const refreshDashboard = await registerCommandSafe(
     "codePause.refreshDashboard",
     async () => {
       // Force immediate metrics aggregation
@@ -1049,7 +1059,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Show progression command
-  const showProgression = vscode.commands.registerCommand(
+  const showProgression = await registerCommandSafe(
     "codePause.showProgression",
     async () => {
       if (!progressTracker) {
@@ -1065,7 +1075,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Assignment commands
-  const createAssignment = vscode.commands.registerCommand(
+  const createAssignment = await registerCommandSafe(
     "codePause.createAssignment",
     async () => {
       if (!assignmentManager || !metricsCollector) {
@@ -1150,7 +1160,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const activateAssignment = vscode.commands.registerCommand(
+  const activateAssignment = await registerCommandSafe(
     "codePause.activateAssignment",
     async () => {
       if (!assignmentManager || !metricsCollector) {
@@ -1185,7 +1195,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const deactivateAssignment = vscode.commands.registerCommand(
+  const deactivateAssignment = await registerCommandSafe(
     "codePause.deactivateAssignment",
     async () => {
       if (!assignmentManager || !metricsCollector) {
@@ -1199,7 +1209,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const showAssignmentStatus = vscode.commands.registerCommand(
+  const showAssignmentStatus = await registerCommandSafe(
     "codePause.showAssignmentStatus",
     async () => {
       if (!assignmentManager || !metricsCollector || !metricsRepository) {
@@ -1242,7 +1252,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const exportAssignmentReport = vscode.commands.registerCommand(
+  const exportAssignmentReport = await registerCommandSafe(
     "codePause.exportAssignmentReport",
     async () => {
       if (
@@ -1388,7 +1398,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Show achievements command
-  const showAchievements = vscode.commands.registerCommand(
+  const showAchievements = await registerCommandSafe(
     "codePause.showAchievements",
     async () => {
       if (!achievementSystem) {
@@ -1403,7 +1413,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Show advanced settings command
-  const showAdvancedSettings = vscode.commands.registerCommand(
+  const showAdvancedSettings = await registerCommandSafe(
     "codePause.showAdvancedSettings",
     async () => {
       if (!settingsProvider) {
@@ -1416,7 +1426,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Export data command
-  const exportData = vscode.commands.registerCommand(
+  const exportData = await registerCommandSafe(
     "codePause.exportData",
     async () => {
       if (!dataExporter) {
@@ -1429,7 +1439,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Import data command
-  const importData = vscode.commands.registerCommand(
+  const importData = await registerCommandSafe(
     "codePause.importData",
     async () => {
       if (!dataExporter) {
@@ -1442,7 +1452,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Show snooze status command
-  const showSnoozeStatus = vscode.commands.registerCommand(
+  const showSnoozeStatus = await registerCommandSafe(
     "codePause.showSnoozeStatus",
     async () => {
       if (!snoozeManager) {
@@ -1456,7 +1466,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Change experience level command
-  const changeExperienceLevel = vscode.commands.registerCommand(
+  const changeExperienceLevel = await registerCommandSafe(
     "codePause.changeExperienceLevel",
     async () => {
       if (!configRepository) {
@@ -1512,7 +1522,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   );
 
   // Force full scan command (for debugging/recovery)
-  const forceFullScan = vscode.commands.registerCommand(
+  const forceFullScan = await registerCommandSafe(
     "codePause.forceFullScan",
     async () => {
       if (!metricsCollector) {
@@ -1554,7 +1564,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const resetAchievements = vscode.commands.registerCommand(
+  const resetAchievements = await registerCommandSafe(
     "codePause.resetAchievements",
     async () => {
       const result = await vscode.window.showWarningMessage(
@@ -1584,7 +1594,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     },
   );
 
-  const clearAllData = vscode.commands.registerCommand(
+  const clearAllData = await registerCommandSafe(
     "codePause.clearAllData",
     async () => {
       const result = await vscode.window.showWarningMessage(
