@@ -61,6 +61,16 @@ export class DatabaseManager implements IDatabaseManager {
   private readonly AUTO_SAVE_OPERATION_COUNT = 10; // Every 10 operations
 
   /**
+   * True when initialize() found an unreadable database and quarantined it.
+   * Surfaces in diagnostics so the user can be told their history did not
+   * survive rather than silently presenting empty numbers.
+   */
+  public recoveredFromCorruption = false;
+
+  /** Where the unreadable database was moved, if one was. */
+  public quarantinedDbPath: string | null = null;
+
+  /**
    * Create a new DatabaseManager
    * @param storagePath Base storage directory (~/.codepause)
    * @param workspacePath Optional workspace path for project-specific DB
@@ -179,24 +189,110 @@ export class DatabaseManager implements IDatabaseManager {
       },
     });
 
-    try {
-      if (fs.existsSync(this.dbPath)) {
-        const buffer = fs.readFileSync(this.dbPath);
-        this.db = new SQL.Database(buffer);
+    // Issues #6/#7: "file is not a database" killed activation entirely.
+    //
+    // sql.js does NOT reject a corrupt buffer in the Database constructor - it
+    // accepts it and only throws on the first exec(), which is createTables().
+    // So the try/catch around the constructor never fired, and a torn write
+    // from an earlier crash left the extension permanently unusable with no
+    // way to recover except deleting the file by hand.
+    //
+    // Verify with a cheap query before trusting the handle. On failure,
+    // quarantine the bytes (never delete - this is audit evidence) and start
+    // fresh so the extension still activates.
+    if (fs.existsSync(this.dbPath)) {
+      if (this.openExistingDatabase(SQL)) {
+        // Healthy.
       } else {
+        this.quarantineCorruptDatabase();
         this.db = new SQL.Database();
       }
+    } else {
+      this.db = new SQL.Database();
+    }
+
+    try {
+      this.createTables();
+      this.runMigrations();
+      this.createIndices();
     } catch (error) {
-      console.error("[CodePause] Database initialization failed:", error);
+      // Still unreadable even as a fresh database: the failure is not the
+      // file but the environment (unwritable directory, wasm problem).
+      // Report it rather than pretending recovery worked.
+      this.db = null;
+      console.error(
+        "[CodePause] Database initialization failed:",
+        error,
+      );
       throw new Error(
         `Failed to initialize database: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
-    this.createTables();
-    this.runMigrations();
-    this.createIndices();
     this.startAutoSave();
+  }
+
+  /**
+   * Open the database file at dbPath, confirming it is really a SQLite file.
+   *
+   * Returns false when the bytes are unreadable, having already closed the
+   * handle so no file lock is left behind.
+   */
+  private openExistingDatabase(SQL: any): boolean {
+    try {
+      const buffer = fs.readFileSync(this.dbPath);
+      const candidate = new SQL.Database(buffer);
+      // exec() is where sql.js actually rejects a non-SQLite file.
+      candidate.exec("SELECT name FROM sqlite_master LIMIT 1;");
+      this.db = candidate;
+      return true;
+    } catch (error) {
+      console.error(
+        "[CodePause] Existing database is unreadable, recovering:",
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Move an unreadable database aside and start a new one.
+   *
+   * The corrupt file is always preserved. This tool exists to produce evidence
+   * about a student's work, so silently destroying a database - or silently
+   * replacing it with an empty one - would be the worst possible failure mode.
+   * Renaming keeps the bytes for inspection and leaves the live path writable.
+   */
+  private quarantineCorruptDatabase(): void {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const quarantinePath = `${this.dbPath}.corrupt-${stamp}`;
+
+    try {
+      fs.renameSync(this.dbPath, quarantinePath);
+      this.quarantinedDbPath = quarantinePath;
+      this.recoveredFromCorruption = true;
+      console.error(
+        `[CodePause] Quarantined unreadable database to ${quarantinePath}. ` +
+          `History before today could not be recovered.`,
+      );
+    } catch (error) {
+      // Could not move it (locked, read-only, permissions). Move it out of
+      // the way by emptying it so initialize() can still succeed.
+      console.error(
+        `[CodePause] Could not quarantine ${this.dbPath}, truncating instead:`,
+        error,
+      );
+      try {
+        fs.writeFileSync(this.dbPath, Buffer.alloc(0));
+      } catch (writeError) {
+        console.error(
+          "[CodePause] Could not clear the corrupt database either:",
+          writeError,
+        );
+      }
+      this.quarantinedDbPath = null;
+      this.recoveredFromCorruption = true;
+    }
   }
 
   /**
@@ -284,7 +380,32 @@ export class DatabaseManager implements IDatabaseManager {
     try {
       const data = this.db.export();
       const buffer = Buffer.from(data);
-      fs.writeFileSync(this.dbPath, buffer);
+
+      // Issues #6/#7: writing straight to dbPath left a window where a crash,
+      // a killed process or a full disk truncated the file mid-write. The next
+      // launch then read a half-written file and sql.js rejected it with
+      // "file is not a database", taking activation down with it.
+      //
+      // Write to a sibling temp file and rename. rename() is atomic within a
+      // filesystem, so dbPath is only ever the old file or the new one, never
+      // a partial one. Same directory matters: the temp file must not be a
+      // different volume, or rename is not atomic.
+      const tempPath = `${this.dbPath}.tmp-${process.pid}`;
+      try {
+        fs.writeFileSync(tempPath, buffer);
+        fs.renameSync(tempPath, this.dbPath);
+      } catch (error) {
+        // Never let a failed save destroy the last good copy.
+        try {
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // Best effort.
+        }
+        throw error;
+      }
+
       this.operationCount = 0;
     } catch (error) {
       console.error("[CodePause] Failed to sync database:", error);

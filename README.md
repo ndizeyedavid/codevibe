@@ -5,7 +5,7 @@
   <span style="opacity:.72">A VS Code extension that tracks AI-assisted coding, plus a standalone verifier that proves a report wasn't edited.</span></p>
 
   <p>
-    <img src="https://img.shields.io/badge/version-0.1.11-0a0a0a?style=flat-square&labelColor=0a0a0a&color=00d084" alt="Version 0.1.11">
+    <img src="https://img.shields.io/badge/version-0.1.12-0a0a0a?style=flat-square&labelColor=0a0a0a&color=00d084" alt="Version 0.1.12">
     <img src="https://img.shields.io/badge/VS_Code-1.85%2B-007ACC?style=flat-square&logo=visual-studio-code" alt="VS Code 1.85+">
     <img src="https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=node.js" alt="Node 20+">
     <img src="https://img.shields.io/badge/tests-1730%20passing-0a0a0a?style=flat-square&labelColor=0a0a0a&color=3fb950" alt="1730 tests passing">
@@ -66,7 +66,7 @@ CodeVibe isn't on the Marketplace or npm yet. Grab the `.vsix` from the [latest 
 
 ```bash
 # Download codevibe-extension-<version>.vsix from the releases page, then:
-code --install-extension codevibe-extension-0.1.11.vsix
+code --install-extension codevibe-extension-0.1.12.vsix
 ```
 
 Or in VS Code: `Cmd/Ctrl+Shift+X` → gear menu → **Install from VSIX…**

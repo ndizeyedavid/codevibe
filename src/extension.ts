@@ -241,6 +241,22 @@ async function initializeStorage(
   databaseManager = new DatabaseManager(storagePath, workspacePath);
   await databaseManager.initialize();
 
+  // Issues #6/#7: a corrupt database now recovers instead of blocking
+  // activation, but that means the numbers on screen start from empty. Say so
+  // plainly - silently presenting a zeroed history on an integrity tool would
+  // be worse than the crash.
+  if (databaseManager.recoveredFromCorruption) {
+    const where = databaseManager.quarantinedDbPath
+      ? ` The unreadable file was kept at ${databaseManager.quarantinedDbPath}.`
+      : "";
+    console.warn(
+      `[CodeVibe] Database recovery: history before today is unavailable.${where}`,
+    );
+    void vscode.window.showWarningMessage(
+      `CodeVibe found an unreadable database and started a fresh one, so history from before today is missing.${where}`,
+    );
+  }
+
   // Initialize data retention manager (30-day rolling window for free tier)
   dataRetentionManager = new DataRetentionManager(_context, databaseManager);
   dataRetentionManager.startCleanupScheduler();
