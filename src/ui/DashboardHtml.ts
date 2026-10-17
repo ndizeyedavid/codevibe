@@ -2462,7 +2462,7 @@ export function getDashboardHtml(
                 const suffix = v.count > 1 ? ' (x' + v.count + ')' : '';
                 reasonLines.push(v.message + suffix);
             });
-            const tooltip = reasonLines.length ? reasonLines.join('\n') : '';
+            const tooltip = reasonLines.length ? reasonLines.join('\\n') : '';
 
             if (hasHigh) {
                 const label = violations.length === 1
