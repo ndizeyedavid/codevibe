@@ -396,8 +396,28 @@ describe('MetricsRepository', () => {
       const coreMetrics = await metricsRepo.getCoreMetrics('mid', mockThreshold);
 
       expect(coreMetrics.authorship.aiPercentage).toBe(0);
-      expect(coreMetrics.ownership.score).toBe(0);
+      expect(coreMetrics.ownership.score).toBe(100);
+      expect(coreMetrics.ownership.category).toBe('not-started');
       expect(coreMetrics.skillHealth.score).toBe(50);
+    });
+
+    it('should keep ownership at zero when AI code exists without review', async () => {
+      mockDb.getDailyMetrics.mockResolvedValue({
+        date: '2024-01-01',
+        totalEvents: 1,
+        totalAILines: 20,
+        totalManualLines: 0,
+        aiPercentage: 100,
+        reviewQualityScore: 0,
+      } as any);
+      mockDb.getFileReviewsForDate.mockResolvedValue([
+        { isReviewed: false, reviewScore: 0, linesSinceReview: 20 },
+      ] as any);
+
+      const coreMetrics = await metricsRepo.getCoreMetrics('mid', mockThreshold);
+
+      expect(coreMetrics.ownership.score).toBe(0);
+      expect(coreMetrics.ownership.category).toBe('none');
     });
   });
 
