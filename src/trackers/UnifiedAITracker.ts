@@ -29,6 +29,12 @@ export class UnifiedAITracker extends BaseTracker {
   private recentTextChanges: Map<string, number> = new Map();
   private readonly TEXT_CHANGE_DEBOUNCE_MS = 2000; // 2 seconds
 
+  // VS Code does not expose an undo/redo flag on document change events.
+  // Keep the last active-editor deletion so its immediate inverse insertion
+  // can be classified as an editor command instead of a large paste.
+  private recentEditorDeletions: Map<string, { timestamp: number; characters: number }> = new Map();
+  private readonly UNDO_REDO_WINDOW_MS = 2000;
+
   // Track baseline line counts per file (established when file is opened)
   // This baseline stays CONSTANT while the file is being tracked for AI modifications
   private fileBaselines: Map<string, number> = new Map();
@@ -396,6 +402,12 @@ export class UnifiedAITracker extends BaseTracker {
       });
 
       if (classification) {
+        if (classification.detectionMethod === 'manual-deletion') {
+          this.recentEditorDeletions.set(filePath, {
+            timestamp,
+            characters: totalRangeLength,
+          });
+        }
         const linesRemoved = Math.ceil(totalRangeLength / 40);
         this.emitEvent({
           eventType: EventType.CodeGenerated,
@@ -414,6 +426,35 @@ export class UnifiedAITracker extends BaseTracker {
           },
         });
       }
+      return;
+    }
+
+    const recentDeletion = this.recentEditorDeletions.get(filePath);
+    if (
+      recentDeletion &&
+      timestamp - recentDeletion.timestamp <= this.UNDO_REDO_WINDOW_MS &&
+      totalTextLength > 0 &&
+      Math.abs(totalTextLength - recentDeletion.characters) <= 1 &&
+      vscode.window.activeTextEditor?.document === event.document
+    ) {
+      this.recentEditorDeletions.delete(filePath);
+      const lines = this.countLines(combinedText);
+      this.emitEvent({
+        eventType: EventType.CodeGenerated,
+        source: CodeSource.Neutral,
+        timestamp,
+        linesOfCode: lines,
+        linesChanged: lines,
+        charactersCount: combinedText.length,
+        filePath,
+        language: event.document.languageId,
+        detectionMethod: 'editor-undo-redo',
+        confidence: 'high',
+        metadata: {
+          editorAssisted: true,
+          reason: 'Undo or redo command in the active editor',
+        },
+      });
       return;
     }
 

@@ -475,6 +475,25 @@ describe('UnifiedAITracker file-system change handling', () => {
       expect(events[0].source).toBe('neutral');
       expect(events[0].detectionMethod).toBe('editor-assisted-change');
     });
+
+    it('treats an immediate undo insertion as neutral', async () => {
+      await tracker.initialize();
+      const document = doc('/proj/src/app.ts', 'x'.repeat(5000));
+      (vscode.window as any).activeTextEditor = { document };
+
+      mockHandlers.textChange!({
+        document,
+        contentChanges: [{ text: '', rangeLength: 5000 }],
+      });
+      mockHandlers.textChange!({
+        document,
+        contentChanges: [{ text: 'x'.repeat(5000), rangeLength: 0 }],
+      });
+
+      expect(events).toHaveLength(2);
+      expect(events[1].source).toBe('neutral');
+      expect(events[1].detectionMethod).toBe('editor-undo-redo');
+    });
   });
 
   describe('baselines are not created for excluded files', () => {
