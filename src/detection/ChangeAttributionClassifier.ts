@@ -14,6 +14,8 @@ export interface EditorChangeClassification {
 }
 
 export class ChangeAttributionClassifier {
+  private readonly LARGE_PASTE_THRESHOLD = 500;
+
   classifyEditorChange(
     change: EditorChangeInput,
   ): EditorChangeClassification | null {
@@ -41,6 +43,13 @@ export class ChangeAttributionClassifier {
   }
 
   private looksEditorAssisted(text: string, languageId: string): boolean {
+    // Large markup blocks must reach the AI detector first. This keeps Emmet
+    // and auto-closing tags neutral without allowing a large HTML paste to
+    // bypass authorship detection.
+    if (text.length >= this.LARGE_PASTE_THRESHOLD) {
+      return false;
+    }
+
     if (!/^(html|handlebars|razor|vue|svelte|xml)$/.test(languageId)) {
       return false;
     }

@@ -36,4 +36,17 @@ describe('ChangeAttributionClassifier', () => {
       isActiveEditor: false,
     })).toBeNull();
   });
+
+  it('does not classify a large HTML paste as editor assistance', () => {
+    const pastedHtml = Array.from({ length: 672 }, (_, index) =>
+      `<div class="row-${index}">content</div>`,
+    ).join('\n');
+
+    expect(classifier.classifyEditorChange({
+      text: pastedHtml,
+      rangeLength: 0,
+      languageId: 'html',
+      isActiveEditor: true,
+    })).toBeNull();
+  });
 });
