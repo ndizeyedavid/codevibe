@@ -3846,12 +3846,15 @@ export function getDashboardHtml(
         });
 
         function showError(message) {
-            document.getElementById('content').innerHTML = \`
+            const content = document.getElementById('content');
+            if (!content) return;
+
+            content.innerHTML = \`
                 <div class="empty-state">
                     <div class="empty-icon">⚠️</div>
                     <h2>Error</h2>
                     <p>\${escapeHtml(message)}</p>
-                    <button onclick="refresh()" style="margin-top: 16px;">Try Again</button>
+                    <button type="button" onclick="refresh()" style="margin-top: 16px;">Try Again</button>
                 </div>
             \`;
         }
