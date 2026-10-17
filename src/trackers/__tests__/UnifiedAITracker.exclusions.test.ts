@@ -447,14 +447,33 @@ describe('UnifiedAITracker file-system change handling', () => {
       expect(events).toHaveLength(0);
     });
 
-    it('flags a large pure deletion as agent modification', async () => {
+    it('treats a large active-editor deletion as neutral', async () => {
       await tracker.initialize();
+      const document = doc('/proj/src/app.ts', 'x');
+      (vscode.window as any).activeTextEditor = { document };
       mockHandlers.textChange!({
-        document: doc('/proj/src/app.ts', 'x'),
+        document,
         contentChanges: [{ text: '', rangeLength: 5000 }],
       });
       expect(events).toHaveLength(1);
-      expect(events[0].detectionMethod).toBe('text-change-large-deletion');
+      expect(events[0].source).toBe('neutral');
+      expect(events[0].detectionMethod).toBe('manual-deletion');
+    });
+
+    it('treats Emmet-style markup as neutral editor assistance', async () => {
+      await tracker.initialize();
+      const document = doc('/proj/index.html', '<div class="container"></div>', {
+        languageId: 'html',
+      });
+      (vscode.window as any).activeTextEditor = { document };
+      mockHandlers.textChange!({
+        document,
+        contentChanges: [{ text: '<div class="container"></div>', rangeLength: 0 }],
+      });
+
+      expect(events).toHaveLength(1);
+      expect(events[0].source).toBe('neutral');
+      expect(events[0].detectionMethod).toBe('editor-assisted-change');
     });
   });
 

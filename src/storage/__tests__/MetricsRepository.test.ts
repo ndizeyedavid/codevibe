@@ -7,7 +7,7 @@ jest.mock('../DatabaseManager');
 import { MetricsRepository } from '../MetricsRepository';
 import { toLocalDateString } from '../../utils/DateUtils';
 import { DatabaseManager } from '../DatabaseManager';
-import { TrackingEvent, AITool, EventType, CodingSession } from '../../types';
+import { TrackingEvent, AITool, CodeSource, EventType, CodingSession } from '../../types';
 
 describe('MetricsRepository', () => {
   let metricsRepo: MetricsRepository;
@@ -292,6 +292,30 @@ describe('MetricsRepository', () => {
       expect(metrics.totalAILines).toBe(80);
       expect(metrics.totalManualLines).toBe(20);
       expect(metrics.aiPercentage).toBe(80);
+    });
+
+    it('excludes neutral editor-assisted changes from authorship totals', async () => {
+      const targetDate = '2024-01-01';
+      const dayStart = new Date(2024, 0, 1).getTime();
+
+      mockDb.getEventsByDateRange.mockResolvedValue([
+        {
+          timestamp: dayStart + 1000,
+          tool: AITool.Copilot,
+          eventType: EventType.CodeGenerated,
+          source: CodeSource.Neutral,
+          linesOfCode: 40,
+          linesChanged: 40,
+          metadata: { editorAssisted: true },
+        } as any,
+      ]);
+      mockDb.getAllFilesForDate.mockResolvedValue([]);
+
+      const metrics = await metricsRepo.calculateDailyMetrics(targetDate);
+
+      expect(metrics.totalAILines).toBe(0);
+      expect(metrics.totalManualLines).toBe(0);
+      expect(metrics.aiPercentage).toBe(0);
     });
 
     it('should filter out old scanner events', async () => {

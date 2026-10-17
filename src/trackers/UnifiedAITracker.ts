@@ -12,9 +12,11 @@ import { BaseTracker } from './BaseTracker';
 import { AIDetector } from '../detection/AIDetector';
 import { EventType, CodeSource, AIClassification } from '../types';
 import { isExcludedFile, isPackageManagerManifestFile } from '../utils/ExcludedPaths';
+import { ChangeAttributionClassifier } from '../detection/ChangeAttributionClassifier';
 
 export class UnifiedAITracker extends BaseTracker {
   private aiDetector: AIDetector;
+  private changeClassifier: ChangeAttributionClassifier;
   private fileSystemWatcher: vscode.FileSystemWatcher | null = null;
   private openFiles: Set<string> = new Set();
 
@@ -48,6 +50,7 @@ export class UnifiedAITracker extends BaseTracker {
     // Use 'ai' as unified source (not tool-specific)
     super('ai' as any, onEvent);
     this.aiDetector = new AIDetector();
+    this.changeClassifier = new ChangeAttributionClassifier();
   }
 
   /**
@@ -382,47 +385,61 @@ export class UnifiedAITracker extends BaseTracker {
     // =============================
     //
     // Scenario 1: File CLOSED when deleted → Uses FileSystemWatcher + git baseline → ALL deletions tracked ✓
-    // Scenario 2: File OPEN + deletion ≥200 chars → Tracked ✓
-    // Scenario 3: File OPEN + deletion <200 chars → SKIPPED (prevents false positives)
-    //
-    // WHY 200 CHARS?
-    // - Prevents false positives: User manually deleting 3-4 lines should NOT count as AI
-    // - Real AI agents typically make large changes (200+ chars) or modify closed files
-    // - Edge case (small deletions to open files) is acceptable to miss
-    //
-    // See DELETION_TRACKING_BEHAVIOR.md for full documentation
+    // Active-editor deletions are neutral: deletion size is not evidence of AI
+    // authorship. Closed-file changes are handled separately by the watcher.
     if (totalTextLength === 0 && totalRangeLength > 0) {
-      const LARGE_DELETION_THRESHOLD = 200; // ~5 lines (prevents false positives)
+      const classification = this.changeClassifier.classifyEditorChange({
+        text: '',
+        rangeLength: totalRangeLength,
+        languageId: event.document.languageId,
+        isActiveEditor: vscode.window.activeTextEditor?.document === event.document,
+      });
 
-      if (totalRangeLength < LARGE_DELETION_THRESHOLD) {
-        // Small deletion - likely manual editing
-        // Skipping to avoid false positives (user manually deleting 3-4 lines)
-        this.log(`[TEXT-CHANGE] ${fileName}: Small deletion (${totalRangeLength} chars < ${LARGE_DELETION_THRESHOLD}), skipping to avoid false positive`);
-        return;
+      if (classification) {
+        const linesRemoved = Math.ceil(totalRangeLength / 40);
+        this.emitEvent({
+          eventType: EventType.CodeGenerated,
+          source: classification.source,
+          timestamp: Date.now(),
+          linesOfCode: 0,
+          linesRemoved,
+          linesChanged: linesRemoved,
+          filePath: event.document.uri.fsPath,
+          language: event.document.languageId,
+          detectionMethod: classification.detectionMethod,
+          confidence: 'high',
+          metadata: {
+            editorAssisted: true,
+            reason: classification.reason,
+          },
+        });
       }
+      return;
+    }
 
-      // Large deletion detected - treat as AI agent modification
-      // Estimate lines removed (average ~40 chars per line)
-      const linesRemoved = Math.ceil(totalRangeLength / 40);
-
+    const editorClassification = this.changeClassifier.classifyEditorChange({
+      text: combinedText,
+      rangeLength: totalRangeLength,
+      languageId: event.document.languageId,
+      isActiveEditor: vscode.window.activeTextEditor?.document === event.document,
+    });
+    if (editorClassification) {
+      const lines = this.countLines(combinedText);
       this.emitEvent({
         eventType: EventType.CodeGenerated,
-        source: CodeSource.AI,
-        timestamp: Date.now(),
-        linesOfCode: 0,
-        linesRemoved: linesRemoved,
-        linesChanged: linesRemoved,
+        source: editorClassification.source,
+        timestamp,
+        linesOfCode: lines,
+        linesChanged: lines,
+        charactersCount: combinedText.length,
         filePath: event.document.uri.fsPath,
         language: event.document.languageId,
-        detectionMethod: 'text-change-large-deletion',
-        confidence: 'medium',
-        isAgentMode: true,
-        aiClassification: AIClassification.Prohibited,
+        detectionMethod: editorClassification.detectionMethod,
+        confidence: 'high',
         metadata: {
-          detectionMethod: 'text-change-large-deletion',
-          confidence: 'medium',
-          isAgentGenerated: true
-        }
+          editorAssisted: true,
+          reason: editorClassification.reason,
+        },
       });
       return;
     }
@@ -641,6 +658,13 @@ export class UnifiedAITracker extends BaseTracker {
     // Defensive re-check (handleFileChange already filters, but file
     // creation and debounced retries route through here too).
     if (this.isExcluded(filePath)) {
+      return;
+    }
+
+    // The editor change event is authoritative while a document is open.
+    // Ignore delayed watcher notifications for that same document.
+    if (this.openFiles.has(filePath)) {
+      this.log(`[PROCESS-CHANGE] SKIPPED - file is open in the editor: ${filePath}`);
       return;
     }
 

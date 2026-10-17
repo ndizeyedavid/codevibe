@@ -438,6 +438,9 @@ export class MetricsRepository {
             (event.linesOfCode ?? 0) + (event.linesRemoved ?? 0);
 
           if (totalLinesChanged > 0) {
+            if (event.source === CodeSource.Neutral) {
+              break;
+            }
             // Check if this is manual code or AI-generated
             // CRITICAL: Check BOTH event.source AND metadata.manual
             // - event.source: Unified source (CodeSource.AI vs CodeSource.Manual)
@@ -524,6 +527,9 @@ export class MetricsRepository {
             (event.linesOfCode ?? 0) + (event.linesRemoved ?? 0);
 
           if (codeGenLinesChanged > 0) {
+            if (event.source === CodeSource.Neutral) {
+              break;
+            }
             // Check if this is manual code or AI-generated
             // CRITICAL: Check BOTH event.source AND metadata.manual
             // - event.source: Unified source (CodeSource.AI vs CodeSource.Manual)
