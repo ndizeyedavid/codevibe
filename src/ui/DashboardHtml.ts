@@ -2074,6 +2074,10 @@ export function getDashboardHtml(
                 <span class="icon">⏸</span>
                 Pause Alerts
             </button>
+            <button onclick="checkForUpdates()">
+                <span class="icon">⇩</span>
+                Check for Updates
+            </button>
         </div>
     </div>
 
@@ -2162,6 +2166,10 @@ export function getDashboardHtml(
 
         function snooze() {
             vscode.postMessage({ type: 'snooze' });
+        }
+
+        function checkForUpdates() {
+            vscode.postMessage({ type: 'checkForUpdates' });
         }
 
         /**

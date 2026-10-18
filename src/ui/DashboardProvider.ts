@@ -103,6 +103,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         case "snooze":
           await vscode.commands.executeCommand("codePause.snooze");
           break;
+        case "checkForUpdates":
+          await vscode.commands.executeCommand("codePause.checkForUpdates");
+          break;
         case "reviewFile":
           // ENHANCED: Open file for review
           await this.openFileForReview(data.filePath);

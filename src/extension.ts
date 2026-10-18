@@ -27,6 +27,7 @@ import { AssignmentManager } from "./assignments/AssignmentManager";
 import { PolicyEngine } from "./assignments/PolicyEngine";
 import { AssignmentReportGenerator } from "./assignments/AssignmentReportGenerator";
 import { writeAssignmentReport } from "./assignments/AssignmentReportFile";
+import { UpdateService } from "./updates/UpdateService";
 import { execSync } from "child_process";
 import { EventType, DeveloperLevel } from "./types";
 import { isGitRepository } from "./utils/SecurityUtils";
@@ -58,6 +59,7 @@ let dataExporter: DataExporter | null = null;
 let settingsProvider: SettingsProvider | null = null;
 let alertEngine: AlertEngine | null = null;
 let blindApprovalDetector: BlindApprovalDetector | null = null;
+let updateService: UpdateService | null = null;
 
 /**
  * Extension activation
@@ -106,6 +108,15 @@ export async function activate(context: vscode.ExtensionContext) {
       notificationService?.showProgressNotification(
         "CodeVibe is now tracking your AI usage",
       );
+    }
+
+    const automaticUpdates = vscode.workspace
+      .getConfiguration("codePause")
+      .get<boolean>("autoUpdateChecks", true);
+    if (automaticUpdates) {
+      setTimeout(() => {
+        void checkForUpdates(false);
+      }, 5000);
     }
   } catch (error) {
     console.error("Failed to activate CodeVibe:", error);
@@ -217,6 +228,63 @@ export async function deactivate() {
   configManager = null;
   thresholdManager = null;
   dashboardProvider = null;
+  updateService = null;
+}
+
+async function checkForUpdates(manual: boolean): Promise<void> {
+  if (!updateService) {
+    if (manual) {
+      vscode.window.showErrorMessage("CodeVibe updater is not initialized");
+    }
+    return;
+  }
+
+  try {
+    const release = await updateService.checkForUpdate(manual);
+    if (!release) {
+      if (manual) {
+        vscode.window.showInformationMessage("CodeVibe is up to date");
+      }
+      return;
+    }
+
+    const notes = release.body.trim().slice(0, 3500) || "No release notes provided.";
+    const action = await vscode.window.showInformationMessage(
+      `CodeVibe ${release.version} is available.\n\n${notes}`,
+      "Update now",
+      "Later",
+    );
+    if (action === "Later") {
+      updateService.dismiss(release.version);
+      return;
+    }
+    if (action !== "Update now") {
+      return;
+    }
+
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: "Updating CodeVibe" },
+      async (progress) => {
+        progress.report({ message: `Downloading ${release.version}...` });
+        await updateService!.install(release);
+      },
+    );
+
+    const reload = await vscode.window.showInformationMessage(
+      `CodeVibe ${release.version} installed. Reload VS Code to finish the update.`,
+      "Reload Window",
+    );
+    if (reload === "Reload Window") {
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
+  } catch (error) {
+    console.error("CodeVibe update check failed:", error);
+    if (manual) {
+      vscode.window.showErrorMessage(
+        `CodeVibe update failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }
 
 /**
@@ -775,6 +843,18 @@ async function initializeCustomization(
 async function registerCommands(
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  updateService = new UpdateService({
+    currentVersion: context.extension.packageJSON.version,
+    repository:
+      vscode.workspace.getConfiguration("codePause").get("updateRepository") ||
+      "waka-man/codevibe",
+  });
+
+  const checkForUpdatesCommand = await registerCommandSafe(
+    "codePause.checkForUpdates",
+    async () => checkForUpdates(true),
+  );
+
   // Open Dashboard command
   const openDashboard = await registerCommandSafe(
     "codePause.openDashboard",
@@ -1722,6 +1802,7 @@ async function registerCommands(
     deactivateAssignment,
     showAssignmentStatus,
     exportAssignmentReport,
+    checkForUpdatesCommand,
   );
 }
 
