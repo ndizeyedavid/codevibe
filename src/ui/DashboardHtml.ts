@@ -7,17 +7,17 @@ import * as vscode from "vscode";
  * @returns HTML string for the dashboard
  */
 export function getDashboardHtml(
-    webview: vscode.Webview,
-    extensionUri: vscode.Uri,
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
 ): string {
-    const logoUri = webview.asWebviewUri(
-        vscode.Uri.joinPath(extensionUri, "resources", "codepause-icon.svg"),
-    );
-    const codiconCssUri = webview.asWebviewUri(
-        vscode.Uri.joinPath(extensionUri, "resources", "codicon.css"),
-    );
+  const logoUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "resources", "codepause-icon.svg"),
+  );
+  const codiconCssUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "resources", "codicon.css"),
+  );
 
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -2925,7 +2925,6 @@ export function getDashboardHtml(
                                 <div style="font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground); display: flex; align-items: center; gap: 6px;">
                                     <span>🤖</span>
                                     <span>AI Tool Attribution</span>
-                                    <span style="font-size: 11px; font-weight: normal; color: var(--vscode-descriptionForeground); margin-left: auto;">Offline detection • No telemetry</span>
                                 </div>
                                 <div style="border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden;">
                                     \${renderToolAttribution(data.toolAttribution)}

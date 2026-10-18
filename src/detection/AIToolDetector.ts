@@ -123,6 +123,15 @@ export class AIToolDetector {
   private lastDetectionTime = 0;
   private readonly DETECTION_COOLDOWN_MS = 30000;
 
+  // Cached result of the last background process scan. detectTool() runs
+  // synchronously inside the emit path, so shelling out to `tasklist`/`ps`
+  // there would block the extension host on every tracked event. The scan
+  // therefore runs on its own timer and detectTool() only reads this cache.
+  private processScan: { at: number; tools: AIToolName[] } = { at: 0, tools: [] };
+  private processScanTimer: NodeJS.Timeout | null = null;
+  private readonly PROCESS_SCAN_INTERVAL_MS = 20000;
+  private readonly PROCESS_SCAN_TTL_MS = 60000;
+
   constructor(options: {
     enabled?: boolean;
     scanProcesses?: boolean;
@@ -130,7 +139,7 @@ export class AIToolDetector {
     readToolConfigs?: boolean;
   } = {}) {
     this.enabled = options.enabled ?? true;
-    this.scanProcesses = options.scanProcesses ?? false;
+    this.scanProcesses = options.scanProcesses ?? true;
     this.readToolConfigs = options.readToolConfigs ?? false;
   }
 
@@ -141,12 +150,76 @@ export class AIToolDetector {
     readToolConfigs?: boolean;
   }): void {
     if (options.enabled !== undefined) this.enabled = options.enabled;
-    if (options.scanProcesses !== undefined) this.scanProcesses = options.scanProcesses;
+    if (options.scanProcesses !== undefined) {
+      this.scanProcesses = options.scanProcesses;
+      if (!this.scanProcesses) {
+        this.stopProcessWatcher();
+        this.processScan = { at: 0, tools: [] };
+      } else if (this.enabled) {
+        this.startProcessWatcher();
+      }
+    }
     if (options.readToolConfigs !== undefined) this.readToolConfigs = options.readToolConfigs;
+    if (options.enabled !== undefined && this.enabled && this.scanProcesses) {
+      this.startProcessWatcher();
+    }
   }
 
-  isEnabled(): boolean {
-    return this.enabled;
+  /**
+   * Start the background process scan. Safe to call repeatedly.
+   */
+  startProcessWatcher(): void {
+    if (!this.enabled || !this.scanProcesses || this.processScanTimer) {
+      return;
+    }
+    const tick = () => {
+      void this.refreshProcessScan();
+    };
+    tick();
+    this.processScanTimer = setInterval(tick, this.PROCESS_SCAN_INTERVAL_MS);
+    // Never hold the extension host open for a background poll.
+    this.processScanTimer.unref?.();
+  }
+
+  stopProcessWatcher(): void {
+    if (this.processScanTimer) {
+      clearInterval(this.processScanTimer);
+      this.processScanTimer = null;
+    }
+  }
+
+  dispose(): void {
+    this.stopProcessWatcher();
+  }
+
+  /**
+   * Run one process scan and refresh the cache. Never throws.
+   */
+  async refreshProcessScan(): Promise<void> {
+    if (!this.enabled || !this.scanProcesses) {
+      return;
+    }
+    try {
+      const tools = this.scanForRunningTools();
+      this.processScan = { at: Date.now(), tools };
+    } catch {
+      this.processScan = { at: Date.now(), tools: [] };
+    }
+  }
+
+  /**
+   * AI tools whose CLI process was seen in the most recent scan, if the cache
+   * is still fresh. Returns an empty list when scanning is off or stale.
+   */
+  private getRunningProcessTools(): AIToolName[] {
+    if (!this.enabled || !this.scanProcesses) {
+      return [];
+    }
+    const age = Date.now() - this.processScan.at;
+    if (this.processScan.at === 0 || age > this.PROCESS_SCAN_TTL_MS) {
+      return [];
+    }
+    return this.processScan.tools;
   }
 
   detectTool(context: {
@@ -189,6 +262,24 @@ export class AIToolDetector {
       }
     }
 
+    // Consult the cached background process scan. This is the signal that
+    // names agentic CLIs (opencode, claude, codex) while they are editing the
+    // workspace, and it costs nothing on this synchronous path.
+    const runningTools = this.getRunningProcessTools();
+    if (runningTools.length > 0) {
+      const best = runningTools[0];
+      const model = this.detectModelForTool(best);
+      this.lastDetectedTool = best;
+      this.lastDetectionTime = now;
+      return {
+        tool: best,
+        model,
+        confidence: runningTools.length === 1 ? 'high' : 'medium',
+        source: 'cli-process',
+        estimated: model === null,
+      };
+    }
+
     const recentTool = this.getRecentlyDetectedTool(now);
     if (recentTool !== 'unknown') {
       return { tool: recentTool, model: null, confidence: 'low', source: 'default', estimated: true };
@@ -197,50 +288,85 @@ export class AIToolDetector {
     return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
   }
 
-  async detectFromProcesses(): Promise<AIToolDetection> {
-    if (!this.scanProcesses || !this.enabled) {
-      return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
+  /**
+   * Shell out once and return the AI tools whose CLI is currently running.
+   * Ordered most-specific first so a long match wins over a substring of it.
+   */
+  private scanForRunningTools(): AIToolName[] {
+    let output = '';
+    if (os.platform() === 'win32') {
+      output = child_process
+        .execSync('tasklist /FO CSV /NH', {
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        .toString();
+    } else {
+      output = child_process
+        .execSync('ps -axo command', {
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        .toString();
     }
 
-    let processOutput = '';
-    try {
-      if (os.platform() === 'win32') {
-        processOutput = child_process.execSync('tasklist', { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).toString();
-      } else {
-        processOutput = child_process.execSync('ps -ax', { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).toString();
-      }
-    } catch {
-      return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
-    }
+    const found = new Map<AIToolName, number>();
 
-    const lines = processOutput.split('\n');
-    const detected: Array<{ tool: KnownAITool; match: string }> = [];
-
-    for (const line of lines) {
+    for (const line of output.split('\n')) {
       const lower = line.toLowerCase();
+      if (!lower.trim()) {
+        continue;
+      }
       for (const tool of KNOWN_AI_TOOLS) {
         for (const proc of tool.cliProcesses) {
-          if (lower.includes(proc.toLowerCase())) {
-            detected.push({ tool, match: proc });
-            break;
+          // Require the process name to appear as a path/executable segment
+          // or at a word boundary, so `claude` does not match an unrelated
+          // path like `/home/user/clauded-something/x`.
+          const idx = lower.lastIndexOf(proc.toLowerCase());
+          if (idx === -1) {
+            continue;
+          }
+          const before = idx === 0 ? '' : lower[idx - 1];
+          const after = lower[idx + proc.length] ?? '';
+          const startsSegment = idx === 0 || /[\\/\\s"']/.test(before);
+          const endsSegment = after === '' || /[\\/\\s"',.]/.test(after);
+          if (startsSegment && endsSegment) {
+            found.set(tool.name, Math.max(found.get(tool.name) ?? 0, proc.length));
           }
         }
       }
     }
 
-    if (detected.length === 0) {
+    return Array.from(found.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name);
+  }
+
+  async detectFromProcesses(): Promise<AIToolDetection> {
+    if (!this.scanProcesses || !this.enabled) {
       return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
     }
 
-    detected.sort((a, b) => b.match.length - a.match.length);
-    const best = detected[0].tool;
-    const model = this.detectModelForTool(best.name);
-    const confidence = detected.length === 1 ? 'high' : 'medium';
+    let tools: AIToolName[];
+    try {
+      tools = this.scanForRunningTools();
+    } catch {
+      return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
+    }
+
+    if (tools.length === 0) {
+      return { tool: 'unknown', model: null, confidence: 'low', source: 'default', estimated: true };
+    }
+
+    const best = tools[0];
+    const model = this.detectModelForTool(best);
 
     return {
-      tool: best.name,
+      tool: best,
       model,
-      confidence,
+      confidence: tools.length === 1 ? 'high' : 'medium',
       source: 'cli-process',
       estimated: model === null,
     };
@@ -454,7 +580,7 @@ export class AIToolDetector {
 export function getDefaultAIToolDetector(): AIToolDetector {
   return new AIToolDetector({
     enabled: true,
-    scanProcesses: false,
+    scanProcesses: true,
     watchTerminal: false,
     readToolConfigs: false,
   });

@@ -169,6 +169,10 @@ export class UnifiedAITracker extends BaseTracker {
     try {
       this.log('Initializing Unified AI Tracker...');
 
+      // Attribute AI edits to a specific tool/model while the agent runs.
+      // Runs on a background timer; see AIToolDetector.
+      this.aiToolDetector.startProcessWatcher();
+
       // BUG #2 FIX: Load persisted baselines first (survives VS Code reload)
       this.loadPersistedBaselines();
 
@@ -777,14 +781,38 @@ export class UnifiedAITracker extends BaseTracker {
       if (workspaceFolder) {
         try {
           const { execSync } = require('child_process');
-          const relativePath = filePath.replace(workspaceFolder + '/', '');
+
+          // path.relative() is separator-aware. The previous
+          // filePath.replace(workspaceFolder + '/', '') only matched POSIX
+          // separators, so on Windows the workspace prefix was never stripped
+          // and git was handed an absolute path.
+          const relativePath = path.relative(workspaceFolder, filePath);
+
+          // A file outside the workspace folder, or one that walks up out of
+          // it, has no meaningful path relative to the repo root.
+          const isInsideWorkspace =
+            relativePath !== '' &&
+            !relativePath.startsWith('..') &&
+            !path.isAbsolute(relativePath);
+
+          if (!isInsideWorkspace) {
+            throw new Error('file is outside the workspace folder');
+          }
 
           try {
             execSync('git rev-parse --git-dir', { cwd: workspaceFolder, stdio: 'ignore' });
 
-            const diffResult = execSync(`git diff HEAD --numstat -- "${relativePath}" 2>/dev/null`, {
+            // NOTE: never append POSIX shell redirects like `2>/dev/null` here.
+            // execSync runs through cmd.exe on Windows, where that redirect
+            // resolves to a literal C:\dev\nul and fails the WHOLE command
+            // with "The system cannot find the path specified." The failure
+            // was swallowed by the catch below, which reported the workspace
+            // as "not a git repo" and silently downgraded every agent-created
+            // file to a baseline-only, no-event path. Use stdio instead.
+            const diffResult = execSync(`git diff HEAD --numstat -- "${relativePath}"`, {
               cwd: workspaceFolder,
-              encoding: 'utf-8'
+              encoding: 'utf-8',
+              stdio: ['ignore', 'pipe', 'ignore'],
             }).trim();
 
             if (diffResult) {
@@ -814,27 +842,39 @@ export class UnifiedAITracker extends BaseTracker {
                 // Error checking git markers
               }
             } else {
-              // Check if file is tracked (no diff means no changes to committed version)
+              // No diff against HEAD. Either the file is untracked (newly
+              // created - very common for agent mode) or it is tracked and
+              // already matches HEAD (pull/merge/commit/checkout).
+              let isTracked = false;
               try {
                 execSync(`git ls-files --error-unmatch "${relativePath}"`, {
                   cwd: workspaceFolder,
-                  stdio: 'ignore'
+                  stdio: 'ignore',
                 });
-                // File is tracked but no diff = change came from git operation (pull, merge, commit, rebase, checkout)
-                // HEAD moved to new commit, so file now matches HEAD
+                isTracked = true;
+              } catch {
+                isTracked = false;
+              }
+
+              if (isTracked) {
+                // Tracked, no diff = the change came from git moving HEAD
+                // (pull/merge/commit/rebase/checkout), not from an agent.
                 this.log(`[PROCESS-CHANGE] File tracked with no diff vs HEAD - git operation detected (pull/merge/etc), will skip AI detection`);
                 isGitOperation = true;
                 linesAdded = 0;
                 linesRemoved = 0;
-              } catch {
-                // New untracked file - use current line count
+              } else {
+                // New untracked file. This is the agent-generated-file case
+                // we care about: an agent created it on disk while it was
+                // closed, so every line in it is agent output.
                 linesAdded = currentLineCount;
                 this.log(`[PROCESS-CHANGE] New untracked file: ${linesAdded} lines`);
               }
             }
-          } catch {
-            // Not a git repo - baseline method will be used as fallback
-            this.log(`[PROCESS-CHANGE] Not a git repo, will use baseline tracking`);
+          } catch (error) {
+            // Genuinely not a git repo (or git unavailable) - baseline
+            // tracking below still covers this, so this is not fatal.
+            this.log(`[PROCESS-CHANGE] git unavailable for this path (${error instanceof Error ? error.message : String(error)}), falling back to baseline tracking`);
           }
         } catch (error) {
           this.log(`[PROCESS-CHANGE] Git diff error: ${error}`);
@@ -1065,6 +1105,8 @@ export class UnifiedAITracker extends BaseTracker {
       this.fileSystemWatcher.dispose();
       this.fileSystemWatcher = null;
     }
+
+    this.aiToolDetector.dispose();
 
     // Clean up debounce timers
     for (const [, data] of this.recentFileChanges) {

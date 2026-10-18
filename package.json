@@ -246,11 +246,11 @@
           "type": "object",
           "default": {
             "enabled": true,
-            "scanProcesses": false,
+            "scanProcesses": true,
             "watchTerminal": false,
             "readToolConfigs": false
           },
-          "description": "Offline AI tool/model detection. Scans local processes, extensions, terminals, and git markers to attribute AI usage to a specific tool. No data leaves your machine."
+          "description": "Offline AI tool/model detection. Names the tool (Copilot, Cursor, Claude Code, OpenCode, Codex, Continue, Codeium) from running local processes, installed extensions, terminal commands, git commit markers and chat sidebars. Runs entirely on this machine; nothing is sent anywhere. scanProcesses polls the local process list on a timer, readToolConfigs reads tool config files under your home directory (both can be disabled)."
         },
         "codePause.autoUpdateChecks": {
           "type": "boolean",
