@@ -111,17 +111,20 @@ export function getDashboardHtml(
         .actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
             margin: 0 0 12px 0;
             padding: 12px;
             background-color: var(--vscode-sideBar-background);
             border-radius: 6px;
             border: 1px solid var(--vscode-panel-border);
+            align-items: center;
         }
 
         .action-group {
             display: flex;
             gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
             padding-right: 12px;
             border-right: 1px solid var(--vscode-panel-border);
         }
@@ -129,6 +132,54 @@ export function getDashboardHtml(
         .action-group:last-child {
             border-right: none;
             padding-right: 0;
+        }
+
+        .actions button {
+            padding: 6px 12px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid var(--vscode-button-border, transparent);
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            white-space: nowrap;
+            flex-shrink: 1;
+            min-width: 0;
+        }
+
+        .actions button:hover {
+            background: var(--vscode-button-hoverBackground);
+        }
+
+        @media (max-width: 520px) {
+            .actions {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+
+            .action-group {
+                flex-direction: column;
+                align-items: stretch;
+                border-right: none;
+                padding-right: 0;
+                border-bottom: 1px solid var(--vscode-panel-border);
+                padding-bottom: 8px;
+                margin-bottom: 8px;
+            }
+
+            .action-group:last-child {
+                border-bottom: none;
+                margin-bottom: 0;
+                padding-bottom: 0;
+            }
+
+            .actions button {
+                width: 100%;
+                justify-content: center;
+                text-align: center;
+                white-space: normal;
+            }
         }
 
         .auto-refresh-status {
