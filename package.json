@@ -53,6 +53,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "codePause.checkForUpdates",
+        "title": "CodeVibe: Check for Updates",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "codePause.showStats",
         "title": "CodeVibe: Show Quick Stats"
       },
@@ -236,6 +241,16 @@
           },
           "default": [],
           "description": "Extra file globs to hard-ignore (appended to the built-in node_modules/venv/build-output ignore list). Events in these paths are never tracked."
+        },
+        "codePause.autoUpdateChecks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check for new CodeVibe VSIX releases after startup"
+        },
+        "codePause.updateRepository": {
+          "type": "string",
+          "default": "waka-man/codevibe",
+          "description": "GitHub repository used for CodeVibe VSIX updates"
         }
       }
     }
