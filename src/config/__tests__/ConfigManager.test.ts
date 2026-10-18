@@ -321,7 +321,7 @@ describe('ConfigManager', () => {
         excludedGlobs: [],
         aiToolDetection: {
           enabled: true,
-          scanProcesses: false,
+          scanProcesses: true,
           watchTerminal: false,
           readToolConfigs: false,
         },

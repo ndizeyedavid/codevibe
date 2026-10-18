@@ -209,6 +209,10 @@ export class UnifiedAITracker extends BaseTracker {
     try {
       this.log('Initializing Unified AI Tracker...');
 
+      // Attribute AI edits to a specific tool/model while the agent runs.
+      // Runs on a background timer; see AIToolDetector.
+      this.aiToolDetector.startProcessWatcher();
+
       // BUG #2 FIX: Load persisted baselines first (survives VS Code reload)
       this.loadPersistedBaselines();
 
@@ -1105,6 +1109,8 @@ export class UnifiedAITracker extends BaseTracker {
       this.fileSystemWatcher.dispose();
       this.fileSystemWatcher = null;
     }
+
+    this.aiToolDetector.dispose();
 
     // Clean up debounce timers
     for (const [, data] of this.recentFileChanges) {
