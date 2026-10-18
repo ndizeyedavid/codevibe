@@ -242,6 +242,16 @@
           "default": [],
           "description": "Extra file globs to hard-ignore (appended to the built-in node_modules/venv/build-output ignore list). Events in these paths are never tracked."
         },
+        "codePause.aiToolDetection": {
+          "type": "object",
+          "default": {
+            "enabled": true,
+            "scanProcesses": false,
+            "watchTerminal": false,
+            "readToolConfigs": false
+          },
+          "description": "Offline AI tool/model detection. Scans local processes, extensions, terminals, and git markers to attribute AI usage to a specific tool. No data leaves your machine."
+        },
         "codePause.autoUpdateChecks": {
           "type": "boolean",
           "default": true,

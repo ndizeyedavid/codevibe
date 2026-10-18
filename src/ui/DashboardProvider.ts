@@ -239,6 +239,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
       const toolBreakdown = await this.getToolBreakdown(today);
 
+      // Get tool/model attribution from event metadata (offline detection)
+      const toolAttribution = await this.getToolAttribution(today);
+
       // Get coding modes breakdown
       const codingModes = await this.getCodingModes(today);
 
@@ -282,6 +285,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         last7Days,
         trends,
         toolBreakdown,
+        toolAttribution,
         codingModes,
         threshold,
         config,
@@ -378,6 +382,71 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     return breakdown;
+  }
+
+  private async getToolAttribution(date: string): Promise<Array<{
+    tool: string;
+    displayName: string;
+    model: string | null;
+    lines: number;
+    events: number;
+    modelEstimated: boolean;
+  }>> {
+    const events = await this.metricsRepository.getEventsForDateRange(date, date);
+
+    const toolMap = new Map<string, {
+      tool: string;
+      displayName: string;
+      model: string | null;
+      lines: number;
+      events: number;
+      modelEstimated: boolean;
+    }>();
+
+    const displayNames: Record<string, string> = {
+      copilot: 'GitHub Copilot',
+      cursor: 'Cursor AI',
+      'claude-code': 'Claude Code',
+      opencode: 'OpenCode',
+      codex: 'OpenAI Codex',
+      continue: 'Continue',
+      codeium: 'Codeium',
+      unknown: 'Unknown',
+    };
+
+    for (const event of events) {
+      if (event.source !== 'ai') {
+        continue;
+      }
+
+      const metadata = event.metadata as Record<string, unknown> | undefined;
+      const tool = (metadata?.aiTool as string) || event.tool || 'unknown';
+      const model = (metadata?.aiModel as string | null) ?? null;
+      const modelEstimated = (metadata?.aiToolEstimated as boolean) ?? true;
+      const lines = (event.linesOfCode || 0) + (event.linesRemoved || 0);
+
+      const existing = toolMap.get(tool);
+      if (existing) {
+        existing.lines += lines;
+        existing.events += 1;
+        // Prefer a non-null, non-estimated model
+        if (model && (!existing.model || existing.modelEstimated)) {
+          existing.model = model;
+          existing.modelEstimated = modelEstimated;
+        }
+      } else {
+        toolMap.set(tool, {
+          tool,
+          displayName: displayNames[tool] || tool,
+          model,
+          lines,
+          events: 1,
+          modelEstimated,
+        });
+      }
+    }
+
+    return Array.from(toolMap.values()).sort((a, b) => b.lines - a.lines);
   }
 
   private async getCodingModes(date: string) {

@@ -171,6 +171,12 @@ export class ConfigManager {
         claudeCode: true // Only Claude Code enabled by default
       },
       excludedGlobs: [],
+      aiToolDetection: {
+        enabled: true,
+        scanProcesses: false,
+        watchTerminal: false,
+        readToolConfigs: false,
+      },
       onboardingCompleted: onboardingCompleted
     };
 
@@ -228,6 +234,17 @@ export class ConfigManager {
       updates.excludedGlobs = excludedGlobs;
     }
 
+    // AI tool detection (offline, no telemetry)
+    const aiToolDetection = vscodeConfig.get<{
+      enabled: boolean;
+      scanProcesses: boolean;
+      watchTerminal: boolean;
+      readToolConfigs: boolean;
+    }>('aiToolDetection');
+    if (aiToolDetection) {
+      updates.aiToolDetection = aiToolDetection;
+    }
+
     // Apply updates if any
     if (Object.keys(updates).length > 0) {
       this.config = await this.configRepo.updateConfig(updates);
@@ -283,6 +300,10 @@ export class ConfigManager {
 
     if (updates.excludedGlobs !== undefined) {
       await vscodeConfig.update('excludedGlobs', updates.excludedGlobs, true);
+    }
+
+    if (updates.aiToolDetection !== undefined) {
+      await vscodeConfig.update('aiToolDetection', updates.aiToolDetection, true);
     }
   }
 

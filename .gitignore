@@ -88,3 +88,4 @@ temp/
 # Kept out of the public repo; it is not part of the extension.
 docs/ai-verification-instructions.md
 docs
+testing/vscode-wakatime

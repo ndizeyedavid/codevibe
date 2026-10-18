@@ -2918,7 +2918,23 @@ export function getDashboardHtml(
                                     \` : ''}
                                 </div>
                             </div>
-                            \` : ''}
+                        \` : ''}
+                        <!-- AI Tool Attribution (offline detection) -->
+                        \${data.toolAttribution && data.toolAttribution.length > 0 ? \`
+                            <div style="margin-bottom: 16px;">
+                                <div style="font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground); display: flex; align-items: center; gap: 6px;">
+                                    <span>🤖</span>
+                                    <span>AI Tool Attribution</span>
+                                    <span style="font-size: 11px; font-weight: normal; color: var(--vscode-descriptionForeground); margin-left: auto;">Offline detection • No telemetry</span>
+                                </div>
+                                <div style="border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden;">
+                                    \${renderToolAttribution(data.toolAttribution)}
+                                </div>
+                                <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 6px;">
+                                    ℹ️ Model names are estimated from local evidence (commit messages, tool configs) where available; otherwise the tool's default model is shown. No data leaves your machine.
+                                </div>
+                            </div>
+                        \` : ''}
                         </div>
                     </div>
                 \`;
@@ -3412,10 +3428,31 @@ export function getDashboardHtml(
             const names = {
                 'copilot': 'GitHub Copilot',
                 'cursor': 'Cursor AI',
-                'claude-code': 'Claude Code'
+                'claude-code': 'Claude Code',
+                'opencode': 'OpenCode',
+                'codex': 'OpenAI Codex',
+                'continue': 'Continue',
+                'codeium': 'Codeium',
             };
             // Return known tool name or escape unknown tool name for security
             return names[tool] || escapeHtml(String(tool));
+        }
+
+        function renderToolAttribution(attribution) {
+            const items = attribution.map((attr, index) => {
+                const isLast = index === attribution.length - 1;
+                const border = isLast ? '' : 'border-bottom: 1px solid var(--vscode-panel-border);';
+                const modelText = attr.model ? ' (' + attr.model + (attr.modelEstimated ? ' · estimated' : '') + ')' : ' (model unknown)';
+                const statusText = attr.modelEstimated ? 'estimated' : 'detected';
+                return '<div style="padding: 10px 14px; ' + border + ' background: var(--vscode-editor-background); display: flex; justify-content: space-between; align-items: center;">' +
+                    '<div style="flex: 1;">' +
+                    '<div style="font-weight: 500; color: var(--vscode-foreground); margin-bottom: 2px;">' + escapeHtml(attr.displayName) + escapeHtml(modelText) + '</div>' +
+                    '<div style="font-size: 11px; color: var(--vscode-descriptionForeground);">' + attr.events + ' event(s) · ' + attr.lines + ' AI line(s)</div>' +
+                    '</div>' +
+                    '<div style="text-align: right; font-size: 11px; font-weight: 500; color: var(--vscode-descriptionForeground);">' + statusText + '</div>' +
+                    '</div>';
+            }).join('');
+            return items;
         }
 
         function getToolIcon(tool) {
