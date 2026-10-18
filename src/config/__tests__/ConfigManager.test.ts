@@ -319,6 +319,12 @@ describe('ConfigManager', () => {
           claudeCode: true // Only Claude Code enabled by default
         },
         excludedGlobs: [],
+        aiToolDetection: {
+          enabled: true,
+          scanProcesses: false,
+          watchTerminal: false,
+          readToolConfigs: false,
+        },
         onboardingCompleted: false, // Should preserve onboarding status
       };
 
