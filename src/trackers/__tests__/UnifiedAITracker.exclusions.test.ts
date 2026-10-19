@@ -383,7 +383,7 @@ describe('UnifiedAITracker file-system change handling', () => {
     });
 
     it('a git operation marker suppresses AI detection', async () => {
-      // A fresh FETCH_HEAD marker means the change came from git, not an agent.
+      // A fresh ORIG_HEAD / HEAD reflog means the change came from git, not an agent.
       fsMock.statSync.mockReturnValue({ mtimeMs: Date.now() } as any);
       execSync.mockImplementation((cmd: string) => {
         if (cmd.includes('rev-parse')) return '.git';
@@ -455,6 +455,99 @@ describe('UnifiedAITracker file-system change handling', () => {
       });
       expect(events).toHaveLength(1);
       expect(events[0].detectionMethod).toBe('text-change-large-deletion');
+    });
+  });
+
+  describe('team git operations are not attributed to AI', () => {
+    // Simulates `git pull` of a teammate's commits: ORIG_HEAD was just
+    // written in /proj/.git, every other marker is absent.
+    const pulling = (p: string) => {
+      if (p.replace(/\\/g, '/').endsWith('/proj/.git/ORIG_HEAD')) {
+        return { mtimeMs: Date.now() };
+      }
+      throw new Error('ENOENT');
+    };
+
+    beforeEach(() => {
+      (vscode.workspace as any).workspaceFolders = [{ uri: uri('/proj') }];
+      fsMock.existsSync.mockReturnValue(false);
+      fsMock.statSync.mockImplementation(pulling);
+      execSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('rev-parse')) { return '.git'; }
+        if (cmd.includes('numstat')) { return ''; }
+        // Pulled file not in the index yet: the watcher fired mid-pull
+        if (cmd.includes('ls-files')) { throw new Error('error-unmatch'); }
+        return '';
+      });
+    });
+
+    afterEach(() => {
+      fsMock.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }));
+    });
+
+    it('does not count a teammate\'s new file pulled while closed', async () => {
+      await tracker.initialize();
+      await mockHandlers.fileCreate!(uri('/proj/src/teammate.ts'));
+      await flushDebounce();
+      expect(events).toHaveLength(0);
+    });
+
+    it('does not count an open file VS Code reloads after a pull', async () => {
+      await tracker.initialize();
+      const pulled = Array(80).fill('const x = 1;').join('\n');
+      mockHandlers.textChange!({
+        document: doc('/proj/src/app.ts', pulled, { isDirty: false }),
+        contentChanges: [{ text: pulled, rangeLength: 40 }],
+      });
+      expect(events).toHaveLength(0);
+      expect(((tracker as any).fileBaselines as Map<string, number>).get('/proj/src/app.ts')).toBe(80);
+    });
+
+    it('does not count lines a pull removes from an open file', async () => {
+      await tracker.initialize();
+      mockHandlers.textChange!({
+        document: doc('/proj/src/app.ts', 'x', { isDirty: false }),
+        contentChanges: [{ text: '', rangeLength: 5000 }],
+      });
+      expect(events).toHaveLength(0);
+    });
+
+    it('still analyzes edits that make the document dirty during a pull', async () => {
+      await tracker.initialize();
+      mockHandlers.textChange!({
+        document: doc('/proj/src/app.ts', 'x', { isDirty: true }),
+        contentChanges: [{ text: '', rangeLength: 5000 }],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].detectionMethod).toBe('text-change-large-deletion');
+    });
+
+    it('still flags agent writes once git is idle', async () => {
+      fsMock.statSync.mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      execSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('rev-parse')) { return '.git'; }
+        if (cmd.includes('numstat')) { return '20\t0\tsrc/agent.ts'; }
+        return '';
+      });
+      await tracker.initialize();
+      await mockHandlers.fileChange!(uri('/proj/src/agent.ts'));
+      await flushDebounce();
+      expect(events).toHaveLength(1);
+      expect(events[0].linesOfCode).toBe(20);
+    });
+
+    it('never shells out with a POSIX-only redirect (breaks every git check on Windows)', async () => {
+      fsMock.statSync.mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      await tracker.initialize();
+      await mockHandlers.fileChange!(uri('/proj/src/a.ts'));
+      await flushDebounce();
+      const commands = execSync.mock.calls.map((c: any[]) => c[0] as string);
+      expect(commands.some((c) => c.includes('numstat'))).toBe(true);
+      expect(commands.every((c) => !c.includes('/dev/null'))).toBe(true);
     });
   });
 
