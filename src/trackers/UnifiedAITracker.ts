@@ -13,6 +13,7 @@ import { AIDetector } from '../detection/AIDetector';
 import { EventType, CodeSource, AIClassification } from '../types';
 import { isExcludedFile, isPackageManagerManifestFile } from '../utils/ExcludedPaths';
 import { ChangeAttributionClassifier } from '../detection/ChangeAttributionClassifier';
+import { isGitOperationActive, waitForGitIdle } from '../utils/GitOperationDetector';
 
 export class UnifiedAITracker extends BaseTracker {
   private aiDetector: AIDetector;
@@ -74,6 +75,45 @@ export class UnifiedAITracker extends BaseTracker {
    */
   private isExcluded(filePath: string): boolean {
     return isExcludedFile(filePath, this.customExcludedGlobs);
+  }
+
+  /** Git operation check for the text-change path (no file-level git work). */
+  private isGitOperationActiveFor(): boolean {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceFolder) {
+      return false;
+    }
+    const gitDir = this.resolveGitDir(workspaceFolder);
+    return gitDir !== null && isGitOperationActive(gitDir);
+  }
+
+  // Absolute git dir per workspace folder. Only successful lookups are cached,
+  // so a later `git init` is still picked up.
+  private gitDirCache: Map<string, string> = new Map();
+
+  /**
+   * Resolve the git directory for a workspace folder, or null if it is not a
+   * git repo. Uses rev-parse so worktrees and submodules (.git file) work.
+   * stderr is ignored via stdio, not `2>/dev/null`, which breaks on Windows.
+   */
+  private resolveGitDir(workspaceFolder: string): string | null {
+    const cached = this.gitDirCache.get(workspaceFolder);
+    if (cached) {
+      return cached;
+    }
+    try {
+      const { execSync } = require('child_process');
+      const output = execSync('git rev-parse --git-dir', {
+        cwd: workspaceFolder,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+      const gitDir = path.resolve(workspaceFolder, String(output ?? '.git').trim() || '.git');
+      this.gitDirCache.set(workspaceFolder, gitDir);
+      return gitDir;
+    } catch {
+      return null;
+    }
   }
 
   // BUG #2 FIX: Load baselines from persistent storage
@@ -339,6 +379,16 @@ export class UnifiedAITracker extends BaseTracker {
     // Track this text change event to prevent double counting with file watcher
     const filePath = event.document.uri.fsPath;
     this.recentTextChanges.set(filePath, Date.now());
+
+    // A file git rewrote on disk (pull, checkout...) is reloaded by VS Code
+    // as one big text change, which looks like an AI paste. A reload leaves
+    // the document clean; typing, pastes and completions make it dirty.
+    if (!event.document.isDirty && this.isGitOperationActiveFor()) {
+      this.log(`[TEXT-CHANGE] ${path.basename(filePath)}: reloaded from disk during git operation, skipping AI detection`);
+      this.fileBaselines.set(filePath, this.countLines(event.document.getText()));
+      this.savePersistedBaselines();
+      return;
+    }
 
     let totalTextLength = 0;
     let totalRangeLength = 0;
@@ -752,62 +802,51 @@ export class UnifiedAITracker extends BaseTracker {
       if (workspaceFolder) {
         try {
           const { execSync } = require('child_process');
-          const relativePath = filePath.replace(workspaceFolder + '/', '');
+          // path.relative + forward slashes: a plain '/' replace left the
+          // path absolute on Windows
+          const relativePath = path.relative(workspaceFolder, filePath).split(path.sep).join('/');
+          const gitDir = this.resolveGitDir(workspaceFolder);
 
-          try {
-            execSync('git rev-parse --git-dir', { cwd: workspaceFolder, stdio: 'ignore' });
+          if (gitDir) {
+            // The watcher can fire mid-pull, before HEAD moves. Let git
+            // finish so pulled files compare equal to the new HEAD.
+            await waitForGitIdle(gitDir);
 
-            const diffResult = execSync(`git diff HEAD --numstat -- "${relativePath}" 2>/dev/null`, {
-              cwd: workspaceFolder,
-              encoding: 'utf-8'
-            }).trim();
-
-            if (diffResult) {
-              const [added, removed] = diffResult.split(/\s+/);
-              linesAdded = parseInt(added, 10) || 0;
-              linesRemoved = parseInt(removed, 10) || 0;
-
-              try {
-                const fetchHeadPath = path.join(workspaceFolder, '.git', 'FETCH_HEAD');
-                const mergeHeadPath = path.join(workspaceFolder, '.git', 'MERGE_HEAD');
-                const now = Date.now();
-
-                for (const markerPath of [fetchHeadPath, mergeHeadPath]) {
-                  try {
-                    const stats = fs.statSync(markerPath);
-                    if (now - stats.mtimeMs < 30000) {
-                      isGitOperation = true;
-                      linesAdded = 0;
-                      linesRemoved = 0;
-                      break;
-                    }
-                  } catch {
-                    // Marker file doesn't exist
-                  }
-                }
-              } catch {
-                // Error checking git markers
-              }
+            // Pulls, checkouts, rebases and stash pops write code to disk -
+            // that is never AI agent mode.
+            if (isGitOperationActive(gitDir)) {
+              this.log(`[PROCESS-CHANGE] Git operation in progress or just finished (pull/checkout/merge/rebase/stash), will skip AI detection`);
+              isGitOperation = true;
             } else {
-              // Check if file is tracked (no diff means no changes to committed version)
-              try {
-                execSync(`git ls-files --error-unmatch "${relativePath}"`, {
-                  cwd: workspaceFolder,
-                  stdio: 'ignore'
-                });
-                // File is tracked but no diff = change came from git operation (pull, merge, commit, rebase, checkout)
-                // HEAD moved to new commit, so file now matches HEAD
-                this.log(`[PROCESS-CHANGE] File tracked with no diff vs HEAD - git operation detected (pull/merge/etc), will skip AI detection`);
-                isGitOperation = true;
-                linesAdded = 0;
-                linesRemoved = 0;
-              } catch {
-                // New untracked file - use current line count
-                linesAdded = currentLineCount;
-                this.log(`[PROCESS-CHANGE] New untracked file: ${linesAdded} lines`);
+              const diffResult = String(execSync(`git diff HEAD --numstat -- "${relativePath}"`, {
+                cwd: workspaceFolder,
+                encoding: 'utf-8',
+                stdio: ['ignore', 'pipe', 'ignore']
+              }) ?? '').trim();
+
+              if (diffResult) {
+                const [added, removed] = diffResult.split(/\s+/);
+                linesAdded = parseInt(added, 10) || 0;
+                linesRemoved = parseInt(removed, 10) || 0;
+              } else {
+                // Check if file is tracked (no diff means no changes to committed version)
+                try {
+                  execSync(`git ls-files --error-unmatch "${relativePath}"`, {
+                    cwd: workspaceFolder,
+                    stdio: 'ignore'
+                  });
+                  // File is tracked but no diff = change came from git operation (pull, merge, commit, rebase, checkout)
+                  // HEAD moved to new commit, so file now matches HEAD
+                  this.log(`[PROCESS-CHANGE] File tracked with no diff vs HEAD - git operation detected (pull/merge/etc), will skip AI detection`);
+                  isGitOperation = true;
+                } catch {
+                  // New untracked file - use current line count
+                  linesAdded = currentLineCount;
+                  this.log(`[PROCESS-CHANGE] New untracked file: ${linesAdded} lines`);
+                }
               }
             }
-          } catch {
+          } else {
             // Not a git repo - baseline method will be used as fallback
             this.log(`[PROCESS-CHANGE] Not a git repo, will use baseline tracking`);
           }
@@ -821,6 +860,7 @@ export class UnifiedAITracker extends BaseTracker {
       if (linesAdded === 0 && linesRemoved === 0) {
         if (isGitOperation) {
           this.fileBaselines.set(filePath, currentLineCount);
+          this.savePersistedBaselines();
           return;
         }
         const baselineLineCount = this.fileBaselines.get(filePath);

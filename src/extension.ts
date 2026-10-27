@@ -377,12 +377,19 @@ async function initializeUI(context: vscode.ExtensionContext): Promise<void> {
   );
 
   // Register dashboard view
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      DashboardProvider.viewType,
-      dashboardProvider,
-    ),
-  );
+  try {
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        DashboardProvider.viewType,
+        dashboardProvider,
+      ),
+    );
+  } catch (error) {
+    console.warn(
+      "[CodeVibe] Dashboard view provider already registered, skipping:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 /**
