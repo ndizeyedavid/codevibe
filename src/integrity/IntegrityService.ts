@@ -29,11 +29,23 @@ export interface IntegrityResult {
 export class IntegrityService {
   private readonly outDir: string;
   private readonly integrityFile: string;
+  private lockDashboard: ((message: string) => void) | null = null;
+  private unlockDashboard: (() => void) | null = null;
 
-  constructor(private readonly updateService?: UpdateService) {
+  constructor(
+    private readonly updateService?: UpdateService,
+    callbacks?: { lock?: (message: string) => void; unlock?: () => void },
+  ) {
     // Compiled to out/integrity/, so out/ is the parent directory.
     this.outDir = path.resolve(__dirname, '..');
     this.integrityFile = path.join(this.outDir, '.integrity');
+    this.lockDashboard = callbacks?.lock ?? null;
+    this.unlockDashboard = callbacks?.unlock ?? null;
+  }
+
+  setDashboardCallbacks(callbacks: { lock?: (message: string) => void; unlock?: () => void }): void {
+    this.lockDashboard = callbacks.lock ?? this.lockDashboard;
+    this.unlockDashboard = callbacks.unlock ?? this.unlockDashboard;
   }
 
   /**
@@ -131,8 +143,10 @@ export class IntegrityService {
   }
 
   /**
-   * Run the local self-check and, on failure, warn the user and offer to
-   * reinstall from GitHub. Never throws.
+   * Run the local self-check. On failure, lock the dashboard, download and
+   * install the authentic version from GitHub (even if the version number is
+   * unchanged), and prompt for a reload. Never throws, never offers a
+   * "dismiss" escape hatch: a tampered build is not allowed to keep running.
    */
   async checkAndRepair(): Promise<IntegrityResult> {
     const result = this.verifyLocal();
@@ -140,39 +154,41 @@ export class IntegrityService {
       return result;
     }
 
-    const action = await vscode.window.showWarningMessage(
-      'CodeVibe integrity check failed: the installed extension does not match its published hash. ' +
-        'It may have been modified. Reinstall the authentic version?',
-      'Reinstall from GitHub',
-      'Dismiss',
-    );
+    // Lock the dashboard immediately so the user cannot keep using the
+    // tampered build while we fetch the authentic one.
+    this.lockDashboard?.('CodeVibe is not authentic. Reinstalling the verified version...');
 
-    if (action === 'Reinstall from GitHub' && this.updateService) {
-      try {
-        const release = await this.updateService.checkForUpdate(true);
-        if (release) {
-          await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Notification, title: 'Reinstalling CodeVibe' },
-            async (progress) => {
-              progress.report({ message: `Downloading ${release.version}...` });
-              await this.updateService!.install(release);
-            },
-          );
-          const reload = await vscode.window.showInformationMessage(
-            `Authentic CodeVibe ${release.version} installed. Reload VS Code to finish.`,
-            'Reload Window',
-          );
-          if (reload === 'Reload Window') {
-            await vscode.commands.executeCommand('workbench.action.reloadWindow');
-          }
-        } else {
-          vscode.window.showInformationMessage('CodeVibe is already up to date.');
+    try {
+      vscode.window.showWarningMessage(
+        'CodeVibe integrity check failed: the installed extension does not match its published hash. ' +
+          'It may have been modified. Reinstalling the authentic version now.',
+      );
+
+      const release = this.updateService ? await this.updateService.getLatestRelease() : null;
+      if (release) {
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: 'Reinstalling CodeVibe' },
+          async (progress) => {
+            progress.report({ message: `Downloading ${release.version}...` });
+            await this.updateService!.install(release);
+          },
+        );
+        const reload = await vscode.window.showInformationMessage(
+          `Authentic CodeVibe ${release.version} installed. Reload VS Code to finish.`,
+          'Reload Window',
+        );
+        if (reload === 'Reload Window') {
+          await vscode.commands.executeCommand('workbench.action.reloadWindow');
         }
-      } catch (error) {
+      } else {
         vscode.window.showErrorMessage(
-          `Reinstall failed: ${error instanceof Error ? error.message : String(error)}`,
+          'Could not fetch the authentic CodeVibe release. The extension remains locked until a verified build is installed.',
         );
       }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Reinstall failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     return result;

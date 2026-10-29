@@ -1856,7 +1856,57 @@ export function getDashboardHtml(
             background: #F48771;
         }
 
-        /* Action buttons */
+        /* Integrity lock overlay */
+        .integrity-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+            color: var(--vscode-foreground);
+        }
+
+        .integrity-overlay .lock-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .integrity-overlay .lock-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .integrity-overlay .lock-message {
+            font-size: 13px;
+            color: var(--vscode-descriptionForeground);
+            max-width: 400px;
+            margin-bottom: 16px;
+        }
+
+        .integrity-overlay .lock-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--vscode-panel-border);
+            border-top-color: var(--vscode-button-background);
+            border-radius: 50%;
+            animation: integrity-spin 1s linear infinite;
+            margin-top: 8px;
+        }
+
+        @keyframes integrity-spin {
+            to { transform: rotate(360deg); }
+        }
         .file-node-actions {
             display: flex;
             gap: 6px;
@@ -2368,6 +2418,12 @@ export function getDashboardHtml(
                 case 'error':
                     showError(message.message);
                     isRefreshing = false;
+                    break;
+                case 'integrityLock':
+                    showIntegrityLock(message.message);
+                    break;
+                case 'integrityUnlock':
+                    hideIntegrityLock();
                     break;
             }
         });
@@ -3939,6 +3995,26 @@ export function getDashboardHtml(
                 dropdown.classList.remove('show');
             }
         });
+
+        function showIntegrityLock(message) {
+            // Remove any existing overlay
+            hideIntegrityLock();
+            const overlay = document.createElement('div');
+            overlay.id = 'integrityOverlay';
+            overlay.className = 'integrity-overlay';
+            overlay.innerHTML = \`
+                <div class="lock-icon">🔒</div>
+                <div class="lock-title">Extension Not Authentic</div>
+                <div class="lock-message">\${escapeHtml(message || 'CodeVibe is not authentic. Reinstalling the verified version...')}</div>
+                <div class="lock-spinner"></div>
+            \`;
+            document.body.appendChild(overlay);
+        }
+
+        function hideIntegrityLock() {
+            const existing = document.getElementById('integrityOverlay');
+            if (existing) existing.remove();
+        }
 
         function showError(message) {
             const content = document.getElementById('content');

@@ -157,6 +157,24 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }, this.REFRESH_DEBOUNCE_MS);
   }
 
+  /**
+   * Lock the dashboard with a full-screen overlay (used by the integrity
+   * check when the extension is found to be tampered). The overlay blocks
+   * interaction until an authentic build is installed.
+   */
+  public lockDashboard(message: string): void {
+    if (!this._view) return;
+    this._view.webview.postMessage({ type: 'integrityLock', message });
+  }
+
+  /**
+   * Remove the integrity overlay once the extension is verified again.
+   */
+  public unlockDashboard(): void {
+    if (!this._view) return;
+    this._view.webview.postMessage({ type: 'integrityUnlock' });
+  }
+
   // BUG #3 FIX: Immediate refresh (bypasses debouncing)
   private async refreshImmediate(forceHtmlUpdate: boolean = false) {
     if (!this._view) {

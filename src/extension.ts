@@ -473,6 +473,14 @@ async function initializeUI(context: vscode.ExtensionContext): Promise<void> {
       error instanceof Error ? error.message : error,
     );
   }
+
+  // Wire integrity service to the dashboard so a tampered build locks the UI.
+  if (integrityService && dashboardProvider) {
+    integrityService.setDashboardCallbacks({
+      lock: (msg) => dashboardProvider!.lockDashboard(msg),
+      unlock: () => dashboardProvider!.unlockDashboard(),
+    });
+  }
 }
 
 /**

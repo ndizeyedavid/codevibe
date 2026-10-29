@@ -71,6 +71,26 @@ export class UpdateService {
     }
   }
 
+  /**
+   * Fetch the latest published release regardless of version comparison.
+   * Used by the integrity check, which must reinstall even when the version
+   * number is unchanged (a tampered build keeps the original version).
+   */
+  async getLatestRelease(): Promise<UpdateRelease | null> {
+    if (this.checking) {
+      return null;
+    }
+    this.checking = true;
+    try {
+      const response = await this.requestJson(
+        `https://api.github.com/repos/${this.repository}/releases/latest`,
+      );
+      return this.parseRelease(response);
+    } finally {
+      this.checking = false;
+    }
+  }
+
   dismiss(version: string): void {
     this.dismissedVersion = version;
   }
