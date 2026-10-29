@@ -28,6 +28,7 @@ import { PolicyEngine } from "./assignments/PolicyEngine";
 import { AssignmentReportGenerator } from "./assignments/AssignmentReportGenerator";
 import { writeAssignmentReport } from "./assignments/AssignmentReportFile";
 import { UpdateService } from "./updates/UpdateService";
+import { IntegrityService } from "./integrity/IntegrityService";
 import { execSync } from "child_process";
 import { EventType, DeveloperLevel } from "./types";
 import { isGitRepository } from "./utils/SecurityUtils";
@@ -60,6 +61,7 @@ let settingsProvider: SettingsProvider | null = null;
 let alertEngine: AlertEngine | null = null;
 let blindApprovalDetector: BlindApprovalDetector | null = null;
 let updateService: UpdateService | null = null;
+let integrityService: IntegrityService | null = null;
 
 /**
  * Extension activation
@@ -117,6 +119,18 @@ export async function activate(context: vscode.ExtensionContext) {
       setTimeout(() => {
         void checkForUpdates(false);
       }, 5000);
+    }
+
+    // Integrity self-check (opt-in, default on). Runs after activation so it
+    // never blocks startup. Warns + offers reinstall if the extension was
+    // tampered with.
+    const integrityEnabled = vscode.workspace
+      .getConfiguration("codePause")
+      .get<boolean>("integrityCheck", true);
+    if (integrityEnabled && integrityService) {
+      setTimeout(() => {
+        void integrityService!.checkAndRepair();
+      }, 8000);
     }
   } catch (error) {
     console.error("Failed to activate CodeVibe:", error);
@@ -229,6 +243,7 @@ export async function deactivate() {
   thresholdManager = null;
   dashboardProvider = null;
   updateService = null;
+  integrityService = null;
 }
 
 async function checkForUpdates(manual: boolean): Promise<void> {
@@ -856,6 +871,8 @@ async function registerCommands(
       vscode.workspace.getConfiguration("codePause").get("updateRepository") ||
       "waka-man/codevibe",
   });
+
+  integrityService = new IntegrityService(updateService);
 
   const checkForUpdatesCommand = await registerCommandSafe(
     "codePause.checkForUpdates",

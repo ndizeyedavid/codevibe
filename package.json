@@ -225,6 +225,11 @@
           "default": true,
           "description": "Anonymize file paths in stored data"
         },
+        "codePause.integrityCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Verify the installed extension matches its published hash on startup. On mismatch, warn and offer to reinstall the authentic version from GitHub."
+        },
         "codePause.trackedTools": {
           "type": "object",
           "default": {
@@ -266,8 +271,9 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compute-integrity && npm run compile",
     "compile": "tsc -p ./",
+    "compute-integrity": "node scripts/compute-integrity.js",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",

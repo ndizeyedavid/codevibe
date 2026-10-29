@@ -3,3 +3,7 @@
 docs/ai-verification-instructions.md
 docs
 testing/vscode-wakatime
+node_modules
+coverage
+out
+test-data

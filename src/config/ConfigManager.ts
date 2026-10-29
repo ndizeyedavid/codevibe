@@ -165,6 +165,7 @@ export class ConfigManager {
       alertFrequency: AlertFrequency.Medium,
       enableGamification: false, // Disabled by default
       anonymizePaths: true,
+      integrityCheck: true,
       trackedTools: {
         copilot: false, // Disabled by default
         cursor: false,  // Disabled by default
@@ -216,6 +217,12 @@ export class ConfigManager {
     const anonymizePaths = vscodeConfig.get<boolean>('anonymizePaths');
     if (anonymizePaths !== undefined && anonymizePaths !== this.config?.anonymizePaths) {
       updates.anonymizePaths = anonymizePaths;
+    }
+
+    // Integrity check
+    const integrityCheck = vscodeConfig.get<boolean>('integrityCheck');
+    if (integrityCheck !== undefined && integrityCheck !== this.config?.integrityCheck) {
+      updates.integrityCheck = integrityCheck;
     }
 
     // Tracked tools
@@ -292,6 +299,10 @@ export class ConfigManager {
 
     if (updates.anonymizePaths !== undefined) {
       await vscodeConfig.update('anonymizePaths', updates.anonymizePaths, true);
+    }
+
+    if (updates.integrityCheck !== undefined) {
+      await vscodeConfig.update('integrityCheck', updates.integrityCheck, true);
     }
 
     if (updates.trackedTools !== undefined) {

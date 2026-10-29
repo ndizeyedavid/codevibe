@@ -325,6 +325,7 @@ describe('ConfigManager', () => {
           watchTerminal: false,
           readToolConfigs: false,
         },
+        integrityCheck: true,
         onboardingCompleted: false, // Should preserve onboarding status
       };
 

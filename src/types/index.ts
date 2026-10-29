@@ -406,6 +406,7 @@ export interface UserConfig {
  alertFrequency: AlertFrequency;
  enableGamification: boolean;
  anonymizePaths: boolean;
+  integrityCheck?: boolean;
   trackedTools: {
     copilot: boolean;
     cursor: boolean;
